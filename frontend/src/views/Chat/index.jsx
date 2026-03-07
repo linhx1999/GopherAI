@@ -31,12 +31,10 @@ const Chat = () => {
     isTempSession,
     editingSession,
     editTitle,
-    canSyncHistory,
     // 会话操作
     createSession,
     switchSession,
     handleMenuClick,
-    handleSyncHistory,
     confirmRename,
     setEditTitle,
     // 消息操作
@@ -71,10 +69,7 @@ const Chat = () => {
       </Sider>
 
       <Content className="chat-content">
-        <ChatHeader
-          canSyncHistory={canSyncHistory}
-          onSyncHistory={handleSyncHistory}
-        />
+        <ChatHeader />
 
         <MessageList
           messages={messages}

@@ -39,9 +39,6 @@ const useChat = () => {
   const [editingSession, setEditingSession] = useState(null)
   const [editTitle, setEditTitle] = useState('')
 
-  // 派生数据
-  const canSyncHistory = activeKey && !isTempSession
-
   // ==================== 会话管理 ====================
 
   // 加载会话列表
@@ -193,15 +190,6 @@ const useChat = () => {
         break
     }
   }, [sessions, shareSession, deleteSession])
-
-  // 同步历史
-  const handleSyncHistory = useCallback(async () => {
-    if (!activeKey || isTempSession) {
-      message.warning('请选择已有会话进行同步')
-      return
-    }
-    await loadMessages(activeKey)
-  }, [activeKey, isTempSession, loadMessages, message])
 
   // 处理会话创建回调
   const handleSessionCreated = useCallback((sessionId) => {
@@ -598,12 +586,10 @@ const useChat = () => {
     isTempSession,
     editingSession,
     editTitle,
-    canSyncHistory,
     // 会话操作
     createSession,
     switchSession,
     handleMenuClick,
-    handleSyncHistory,
     confirmRename,
     setEditTitle,
     // 消息操作
