@@ -53,7 +53,6 @@ const SessionSider = ({
         menu={(item) => ({
           items: [
             { label: '重命名', key: 'rename', icon: <EditOutlined /> },
-            { label: '分享', key: 'share', icon: <ShareAltOutlined /> },
             { type: 'divider' },
             { label: '删除会话', key: 'deleteChat', icon: <DeleteOutlined />, danger: true }
           ],
