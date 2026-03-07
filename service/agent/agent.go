@@ -38,12 +38,6 @@ const (
 	SSEEventTypeMessageEnd   = "message_end"
 )
 
-// SSEEvent SSE 事件结构
-type SSEEvent struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
-
 // MetaEvent 元信息事件
 type MetaEvent struct {
 	SessionID    string `json:"session_id"`
@@ -174,17 +168,21 @@ func buildMessages(history []*model.Message, userContent string) []*schema.Messa
 
 // sendSSEEvent 发送 SSE 事件
 func sendSSEEvent(writer http.ResponseWriter, eventType string, payload interface{}) error {
+	// 序列化 payload
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	event := SSEEvent{
-		Type:    eventType,
-		Payload: data,
+	// 转换为 map 并添加 type 字段
+	var eventMap map[string]interface{}
+	if err := json.Unmarshal(data, &eventMap); err != nil {
+		return err
 	}
+	eventMap["type"] = eventType
 
-	eventData, err := json.Marshal(event)
+	// 序列化并发送
+	eventData, err := json.Marshal(eventMap)
 	if err != nil {
 		return err
 	}
