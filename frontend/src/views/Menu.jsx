@@ -25,11 +25,11 @@ const Menu = () => {
 
   const menuItems = [
     {
-      key: 'ai-chat',
+      key: 'chat',
       title: 'AI聊天',
       description: '与AI进行智能对话',
       icon: <MessageOutlined style={{ fontSize: 48, color: '#1677ff' }} />,
-      path: '/ai-chat'
+      path: '/chat'
     },
     {
       key: 'image-recognition',

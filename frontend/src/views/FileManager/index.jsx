@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { App, Layout, Table, Button, Space, Upload, Modal, Tag, Tooltip, Popconfirm } from 'antd'
 import { UploadOutlined, CloudUploadOutlined, FileTextOutlined, DeleteOutlined, ReloadOutlined, CheckCircleOutlined, LoadingOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import api from '../../utils/api'
-import { API_ENDPOINTS, STATUS_CODES } from '../AIChat/config/constants'
+import { API_ENDPOINTS, STATUS_CODES } from '../Chat/config/constants'
 import './index.css'
 
 const { Header, Content } = Layout

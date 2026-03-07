@@ -1,202 +1,25 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Layout, Button, Checkbox, App, Pagination, Input, Avatar, Typography, Badge, Tooltip, Dropdown, Flex, Divider } from 'antd'
+import { App } from 'antd'
+import api, { API_BASE_URL } from '../../../utils/api'
 import {
-  RollbackOutlined,
-  SyncOutlined,
-  PlusOutlined,
-  EditOutlined,
-  ShareAltOutlined,
-  DeleteOutlined,
-  CopyOutlined,
-  RedoOutlined,
-  SoundOutlined,
-  UserOutlined,
-  RobotOutlined,
-  CloudUploadOutlined,
-  LinkOutlined,
-  ToolOutlined,
-  ThunderboltOutlined,
-  SearchOutlined,
-  BulbOutlined,
-  CloudOutlined
-} from '@ant-design/icons'
-import { Conversations, Sender, Welcome, Bubble, Actions, Attachments } from '@ant-design/x'
-import XMarkdown from '@ant-design/x-markdown'
-import api, { API_BASE_URL } from '../../utils/api'
-import {
-  TOOL_OPTIONS,
   MESSAGE_PAGE_SIZE,
-  COLORS,
-  MESSAGE_MAX_WIDTH,
   STATUS_CODES,
   API_ENDPOINTS,
   MESSAGE_ROLES,
   SPECIAL_SESSIONS,
   SSE_EVENT_TYPES
-} from './config/constants'
-import './index.css'
+} from '../config/constants'
+import { generateMessageId, parseSSELine } from '../utils/helpers.jsx'
 
-const { Text } = Typography
-const { Sider, Content } = Layout
-const Switch = Sender.Switch
-
-// ID 生成器
-let idCounter = 0
-const generateMessageId = () => {
-  idCounter += 1
-  return `msg_${Date.now()}_${idCounter}`
-}
-
-// 流式内容 Hook - 参考 Ant Design X 官方示例
-// 用于实现逐字显示的打字效果
-function useStreamContent(
-  content,
-  { step = 2, interval = 50 } = {}
-) {
-  const [streamContent, setStreamContent] = useState('')
-  const streamRef = useRef('')
-  const doneRef = useRef(true)
-  const timerRef = useRef(-1)
-  const stepRef = useRef(step)
-  const intervalRef = useRef(interval)
-
-  // 使用 useEffect 更新 ref
-  useEffect(() => {
-    stepRef.current = step
-    intervalRef.current = interval
-  }, [step, interval])
-
-  // 流式开始函数
-  const startStream = useCallback((text) => {
-    doneRef.current = false
-    streamRef.current = ''
-    timerRef.current = setInterval(() => {
-      const len = streamRef.current.length + stepRef.current
-      if (len <= text.length - 1) {
-        const newContent = text.slice(0, len)
-        setStreamContent(newContent)
-        streamRef.current = newContent
-      } else {
-        setStreamContent(text)
-        streamRef.current = text
-        doneRef.current = true
-        clearInterval(timerRef.current)
-      }
-    }, intervalRef.current)
-  }, [])
-
-  useEffect(() => {
-    // 内容相同，不处理
-    if (content === streamRef.current) return
-
-    // 清空内容
-    if (!content && streamRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setStreamContent('')
-      doneRef.current = true
-      clearInterval(timerRef.current)
-      return
-    }
-
-    // 新内容开始流式
-    if (!streamRef.current && content) {
-      clearInterval(timerRef.current)
-      startStream(content)
-    } else if (content.indexOf(streamRef.current) !== 0) {
-      // 非起始子集认为是全新内容，重新开始流式
-      clearInterval(timerRef.current)
-      startStream(content)
-    }
-  }, [content, startStream])
-
-  // 清理定时器
-  useEffect(() => {
-    return () => clearInterval(timerRef.current)
-  }, [])
-
-  // 使用 state 来跟踪 done 状态，而不是直接返回 ref
-  const [isDone, setIsDone] = useState(true)
-  useEffect(() => {
-    // 定期检查 done 状态
-    const checkDone = setInterval(() => {
-      setIsDone(doneRef.current)
-    }, 50)
-    return () => clearInterval(checkDone)
-  }, [])
-
-  return [streamContent, isDone]
-}
-
-// 创建消息操作项
-const createMessageActions = (isUser) => {
-  const baseItems = [{ key: 'copy', icon: <CopyOutlined />, label: '复制' }]
-  if (isUser) {
-    return [...baseItems, { key: 'retry', icon: <RedoOutlined />, label: '重发' }]
-  }
-  return [...baseItems, { key: 'tts', icon: <SoundOutlined />, label: '朗读' }]
-}
-
-// Markdown 渲染
-const renderMarkdown = (content) => <XMarkdown content={content} />
-
-// 流式消息组件 - 使用 useStreamContent 实现逐字显示效果
-const StreamBubble = ({ item, onActionClick }) => {
-  const [streamContent, isDone] = useStreamContent(item.content, { step: 3, interval: 30 })
-  const isStreaming = item.streaming && !isDone
-
-  return (
-    <Bubble
-      placement="start"
-      avatar={<Avatar icon={<RobotOutlined />} style={{ backgroundColor: COLORS.primary }} />}
-      header={<Text type="secondary" style={{ fontSize: 12 }}>AI 助手</Text>}
-      content={isStreaming ? streamContent : item.content}
-      streaming={isStreaming}
-      typing={false}
-      contentRender={renderMarkdown}
-      footer={item.loading ? null : (
-        <Actions items={createMessageActions(false)} onClick={(info) => onActionClick(item, info)} />
-      )}
-      style={{ maxWidth: MESSAGE_MAX_WIDTH }}
-    />
-  )
-}
-
-// Role 配置
-const createRoleConfig = (onActionClick) => ({
-  ai: {
-    placement: 'start',
-    avatar: <Avatar icon={<RobotOutlined />} style={{ backgroundColor: COLORS.primary }} />,
-    header: <Text type="secondary" style={{ fontSize: 12 }}>AI 助手</Text>,
-    contentRender: renderMarkdown,
-    footer: (item) => item.loading ? null : (
-      <Actions items={createMessageActions(false)} onClick={(info) => onActionClick(item, info)} />
-    ),
-    style: { maxWidth: MESSAGE_MAX_WIDTH }
-  },
-  user: {
-    placement: 'end',
-    typing: false,
-    avatar: <Avatar icon={<UserOutlined />} style={{ backgroundColor: COLORS.success }} />,
-    header: <Text type="secondary" style={{ fontSize: 12 }}>我</Text>,
-    contentRender: renderMarkdown,
-    footer: (item) => item.loading ? null : (
-      <Actions items={createMessageActions(true)} onClick={(info) => onActionClick(item, info)} />
-    ),
-    style: { maxWidth: MESSAGE_MAX_WIDTH }
-  },
-  system: { placement: 'center', variant: 'borderless', avatar: null, style: { textAlign: 'center' } }
-})
-
-// 主组件
-const AIChat = () => {
-  const navigate = useNavigate()
+/**
+ * 聊天逻辑 Hook - 合并会话管理和消息发送逻辑
+ */
+const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
-  const senderRef = useRef(null)
 
   // 基础状态
-  const [selectedTools, setSelectedTools] = useState(['knowledge_search']) // 默认选择知识库检索
+  const [selectedTools, setSelectedTools] = useState(['knowledge_search'])
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')
@@ -217,12 +40,9 @@ const AIChat = () => {
   const [editTitle, setEditTitle] = useState('')
 
   // 派生数据
-  const paginatedMessages = useMemo(() => {
-    const start = (currentPage - 1) * MESSAGE_PAGE_SIZE
-    return messages.slice(start, start + MESSAGE_PAGE_SIZE)
-  }, [messages, currentPage])
-
   const canSyncHistory = activeKey && !isTempSession
+
+  // ==================== 会话管理 ====================
 
   // 加载会话列表
   const loadSessions = useCallback(async () => {
@@ -395,32 +215,9 @@ const AIChat = () => {
     }
   }, [isTempSession])
 
-  // 解析 SSE 数据行
-  const parseSSELine = useCallback((line) => {
-    const trimmedLine = line.trim()
-    if (!trimmedLine || !trimmedLine.startsWith('data:')) {
-      return null
-    }
+  // ==================== 消息发送 ====================
 
-    const data = trimmedLine.slice(5).trim()
-
-    if (data === '[DONE]') {
-      return { type: 'done', data }
-    }
-
-    if (data.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(data)
-        return { type: 'json', data: parsed }
-      } catch {
-        return { type: 'text', data }
-      }
-    }
-
-    return { type: 'text', data }
-  }, [])
-
-  // 流式发送消息 - 使用新的统一 Agent 接口
+  // 流式发送消息
   const sendStreamMessage = useCallback(async (question, regenerateFrom = null) => {
     const aiMessageId = generateMessageId()
     setMessages(prev => [...prev, {
@@ -432,20 +229,16 @@ const AIChat = () => {
     }])
 
     const url = `${API_BASE_URL}${API_ENDPOINTS.AGENT}`
-
-    // 构建请求体
     const body = {
       message: question,
       tools: selectedTools,
       stream: true
     }
     
-    // 如果有会话 ID 且不是临时会话
     if (activeKey && !isTempSession) {
       body.session_id = activeKey
     }
     
-    // 如果是重新生成
     if (regenerateFrom !== null) {
       body.regenerate_from = regenerateFrom
     }
@@ -453,20 +246,16 @@ const AIChat = () => {
     let currentSessionId = activeKey
     let fullContent = ''
     let isFinalized = false
-    let messageIndex = 0
 
-    // 更新消息内容的辅助函数
     const updateMessageContent = (content) => {
       setMessages(prev => prev.map(m =>
         m.key === aiMessageId ? { ...m, content, loading: false, streaming: true } : m
       ))
     }
 
-    // 完成消息的辅助函数
     const finalizeMessage = () => {
       if (isFinalized) return
       isFinalized = true
-      console.log('[SSE] Finalizing message')
       setMessages(prev => prev.map(m =>
         m.key === aiMessageId ? { ...m, loading: false, streaming: false } : m
       ))
@@ -493,10 +282,7 @@ const AIChat = () => {
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) {
-          console.log('[SSE] Stream done')
-          break
-        }
+        if (done) break
 
         const chunk = decoder.decode(value, { stream: true })
         buffer += chunk
@@ -507,29 +293,22 @@ const AIChat = () => {
           const parsed = parseSSELine(line)
           if (!parsed) continue
 
-          // 处理结构化 SSE 事件
           if (parsed.type === 'json' && parsed.data.type) {
             const event = parsed.data
             
             switch (event.type) {
               case SSE_EVENT_TYPES.META:
-                // 元信息事件：包含 session_id 和 message_index
                 if (event.session_id) {
                   currentSessionId = String(event.session_id)
-                  messageIndex = event.message_index || 0
-                  console.log('[SSE] Meta:', { sessionId: currentSessionId, messageIndex })
                   handleSessionCreated(currentSessionId)
                 }
                 break
                 
               case SSE_EVENT_TYPES.TOOL_CALL:
-                // 工具调用事件
                 console.log('[SSE] Tool call:', event)
-                // 可以在这里显示工具调用状态
                 break
                 
               case SSE_EVENT_TYPES.CONTENT_DELTA:
-                // 内容增量事件
                 if (event.content) {
                   fullContent += event.content
                   updateMessageContent(fullContent)
@@ -537,14 +316,10 @@ const AIChat = () => {
                 break
                 
               case SSE_EVENT_TYPES.MESSAGE_END:
-                // 消息结束事件
-                console.log('[SSE] Message end:', event.status)
                 finalizeMessage()
                 break
                 
               case SSE_EVENT_TYPES.ERROR:
-                // 错误事件
-                console.error('[SSE] Error:', event)
                 setMessages(prev => prev.map(m =>
                   m.key === aiMessageId ? { 
                     ...m, 
@@ -557,32 +332,20 @@ const AIChat = () => {
                 return
                 
               default:
-                console.log('[SSE] Unknown event type:', event.type)
+                break
             }
           } else if (parsed.type === 'done') {
-            // 兼容旧格式
             finalizeMessage()
           } else if (parsed.type === 'json' && parsed.data.sessionId) {
-            // 兼容旧格式：JSON 中包含 sessionId
             currentSessionId = String(parsed.data.sessionId)
             handleSessionCreated(currentSessionId)
           } else if (parsed.type === 'text') {
-            // 兼容旧格式：纯文本
             fullContent += parsed.data
             updateMessageContent(fullContent)
           }
         }
       }
 
-      // 处理 buffer 中剩余的数据
-      if (buffer.trim()) {
-        const parsed = parseSSELine(buffer)
-        if (parsed && parsed.type === 'json' && parsed.data.type === SSE_EVENT_TYPES.MESSAGE_END) {
-          finalizeMessage()
-        }
-      }
-
-      // 如果还没有 finalize，现在 finalize
       if (!isFinalized) {
         finalizeMessage()
       }
@@ -596,9 +359,9 @@ const AIChat = () => {
       }
       message.error('流式传输出错: ' + err.message)
     }
-  }, [selectedTools, activeKey, isTempSession, handleSessionCreated, parseSSELine, message])
+  }, [selectedTools, activeKey, isTempSession, handleSessionCreated, message])
 
-  // 非流式发送消息 - 使用新的统一 Agent 接口
+  // 非流式发送消息
   const sendNormalMessage = useCallback(async (question, regenerateFrom = null) => {
     const aiMessageId = generateMessageId()
     setMessages(prev => [...prev, {
@@ -608,7 +371,6 @@ const AIChat = () => {
       loading: true
     }])
 
-    // 构建请求体
     const payload = {
       message: question,
       tools: selectedTools,
@@ -701,7 +463,7 @@ const AIChat = () => {
       messageContent = content ? `${content}\n\n[附件: ${fileNames}]` : `[附件: ${fileNames}]`
     }
 
-    // 添加用户消息（如果不是重新生成）
+    // 添加用户消息
     if (options.regenerateFrom === undefined) {
       const userMessage = {
         key: generateMessageId(),
@@ -766,7 +528,6 @@ const AIChat = () => {
       const response = await api.post(API_ENDPOINTS.TTS, { text })
       if (response.data?.status_code === STATUS_CODES.SUCCESS && response.data.task_id) {
         const taskId = response.data.task_id
-        // 轮询查询结果
         let attempts = 0
         while (attempts < 30) {
           const queryResponse = await api.get(API_ENDPOINTS.TTS_QUERY, { params: { task_id: taskId } })
@@ -820,236 +581,42 @@ const AIChat = () => {
     }
   }, [attachments])
 
-  // 会话列表项
-  const conversationItems = useMemo(() => {
-    return sessions.map(session => ({
-      key: session.id,
-      label: editingSession === session.id ? (
-        <Input
-          size="small"
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          onPressEnter={confirmRename}
-          onBlur={confirmRename}
-          autoFocus
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : session.title || `会话 ${session.id}`,
-      timestamp: session.timestamp
-    }))
-  }, [sessions, editingSession, editTitle, confirmRename])
-
-  // Role 配置
-  const roleConfig = useMemo(() => createRoleConfig(handleActionClick), [handleActionClick])
-
-  // 附件区域头部
-  const senderHeader = useMemo(() => (
-    <Sender.Header
-      title="附件"
-      open={attachmentsOpen}
-      onOpenChange={setAttachmentsOpen}
-      styles={{
-        content: {
-          padding: 0,
-        },
-      }}
-    >
-      <Attachments
-        beforeUpload={() => false}
-        items={attachments}
-        onChange={({ file, fileList }) => {
-          const updatedFileList = fileList.map(item => {
-            if (item.uid === file.uid && file.status !== 'removed' && item.originFileObj) {
-              // 清理旧 URL
-              if (item.url?.startsWith('blob:')) {
-                URL.revokeObjectURL(item.url)
-              }
-              // 创建预览 URL
-              return {
-                ...item,
-                url: URL.createObjectURL(item.originFileObj)
-              }
-            }
-            return item
-          })
-          setAttachments(updatedFileList)
-        }}
-        placeholder={type =>
-          type === 'drop'
-            ? {
-                title: '拖放文件到此处',
-              }
-            : {
-                icon: <CloudUploadOutlined />,
-                title: '上传文件',
-                description: '点击或拖拽文件到此区域上传',
-              }
-        }
-        getDropContainer={() => senderRef.current?.nativeElement}
-      />
-    </Sender.Header>
-  ), [attachmentsOpen, attachments])
-
-  return (
-    <Layout className="ai-chat-container">
-      <Sider width={280} className="session-sider">
-        <div className="session-header">
-          <span>会话列表</span>
-          <Button type="primary" icon={<PlusOutlined />} onClick={createSession} block>
-            新聊天
-          </Button>
-        </div>
-        <Conversations
-          items={conversationItems}
-          activeKey={activeKey}
-          onActiveChange={switchSession}
-          className="conversations-list"
-          menu={(item) => ({
-            items: [
-              { label: '重命名', key: 'rename', icon: <EditOutlined /> },
-              { label: '分享', key: 'share', icon: <ShareAltOutlined /> },
-              { type: 'divider' },
-              { label: '删除会话', key: 'deleteChat', icon: <DeleteOutlined />, danger: true }
-            ],
-            onClick: (itemInfo) => handleMenuClick(itemInfo, item.key)
-          })}
-        />
-      </Sider>
-
-      <Content className="chat-content">
-        <div className="chat-toolbar">
-          <Button icon={<RollbackOutlined />} onClick={() => navigate('/menu')}>
-            返回
-          </Button>
-        </div>
-
-        <div className="messages-container">
-          {messages.length === 0 ? (
-            <Welcome title="Hello! 我是你的智能助手，请问有什么我可以帮助你的吗？" />
-          ) : (
-            <div className="message-list-container">
-              {paginatedMessages.map((item) => {
-                // AI 消息使用 StreamBubble 组件
-                if (item.role === MESSAGE_ROLES.AI) {
-                  return (
-                    <StreamBubble
-                      key={item.key}
-                      item={item}
-                      onActionClick={handleActionClick}
-                    />
-                  )
-                }
-                // 其他消息使用标准 Bubble 组件
-                const config = roleConfig[item.role] || roleConfig.user
-                return (
-                  <Bubble
-                    key={item.key}
-                    {...config}
-                    content={item.content}
-                    loading={item.loading}
-                  />
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {messages.length > MESSAGE_PAGE_SIZE && (
-          <div className="pagination-container">
-            <Pagination
-              simple
-              current={currentPage}
-              onChange={setCurrentPage}
-              total={messages.length}
-              pageSize={MESSAGE_PAGE_SIZE}
-              showSizeChanger={false}
-            />
-          </div>
-        )}
-
-        <div className="input-container">
-          <Sender
-            ref={senderRef}
-            header={senderHeader}
-            value={inputValue}
-            onChange={setInputValue}
-            onSubmit={handleSend}
-            loading={isLoading}
-            suffix={false}
-            placeholder="请输入你的问题..."
-            footer={(actionNode) => (
-              <Flex justify="space-between" align="center">
-                {/* 左侧控制区 */}
-                <Flex gap="small" align="center">
-                  {/* 附件按钮 */}
-                  <Button
-                    type="text"
-                    icon={<LinkOutlined />}
-                    onClick={() => setAttachmentsOpen(!attachmentsOpen)}
-                  />
-
-                  {/* 流式响应开关 */}
-                  <Switch
-                    value={isStreaming}
-                    checkedChildren="流式"
-                    unCheckedChildren="普通"
-                    onChange={setIsStreaming}
-                    icon={<ThunderboltOutlined />}
-                  />
-
-                  {/* 工具选择下拉菜单 */}
-                  <Dropdown
-                    trigger={['click']}
-                    popupRender={() => (
-                      <div style={{
-                        padding: 12,
-                        background: '#fff',
-                        borderRadius: 8,
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                        minWidth: 160
-                      }}>
-                        <div style={{ marginBottom: 8, fontWeight: 500, color: '#666' }}>
-                          选择工具
-                        </div>
-                        <Checkbox.Group
-                          value={selectedTools}
-                          onChange={setSelectedTools}
-                          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-                        >
-                          {TOOL_OPTIONS.map(tool => {
-                            const IconComponent = tool.icon === 'SearchOutlined' ? SearchOutlined :
-                              tool.icon === 'BulbOutlined' ? BulbOutlined : CloudOutlined
-                            return (
-                              <Checkbox key={tool.value} value={tool.value}>
-                                <Flex align="center" gap={4}>
-                                  <IconComponent />
-                                  {tool.label}
-                                </Flex>
-                              </Checkbox>
-                            )
-                          })}
-                        </Checkbox.Group>
-                      </div>
-                    )}
-                  >
-                    <Switch value={selectedTools.length > 0} icon={<ToolOutlined />}>
-                      工具 {selectedTools.length > 0 && `(${selectedTools.length})`}
-                    </Switch>
-                  </Dropdown>
-
-                </Flex>
-
-                {/* 右侧提交区 */}
-                <Flex align="center">
-                  {actionNode}
-                </Flex>
-              </Flex>
-            )}
-          />
-        </div>
-      </Content>
-    </Layout>
-  )
+  return {
+    // refs
+    bubbleListRef,
+    // 基础状态
+    selectedTools,
+    isStreaming,
+    currentPage,
+    inputValue,
+    isLoading,
+    attachments,
+    attachmentsOpen,
+    messages,
+    sessions,
+    activeKey,
+    isTempSession,
+    editingSession,
+    editTitle,
+    canSyncHistory,
+    // 会话操作
+    createSession,
+    switchSession,
+    handleMenuClick,
+    handleSyncHistory,
+    confirmRename,
+    setEditTitle,
+    // 消息操作
+    handleSend,
+    handleActionClick,
+    // 状态更新
+    setSelectedTools,
+    setIsStreaming,
+    setCurrentPage,
+    setInputValue,
+    setAttachments,
+    setAttachmentsOpen
+  }
 }
 
-export default AIChat
+export default useChat

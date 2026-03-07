@@ -2,7 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import Login from '../views/Login'
 import Register from '../views/Register'
 import Menu from '../views/Menu'
-import AIChat from '../views/AIChat'
+import Chat from '../views/Chat'
 import ImageRecognition from '../views/ImageRecognition'
 import FileManager from '../views/FileManager'
 import PrivateRoute from '../components/PrivateRoute'
@@ -34,8 +34,8 @@ const router = createBrowserRouter([
         element: <Menu />
       },
       {
-        path: '/ai-chat',
-        element: <AIChat />
+        path: '/chat',
+        element: <Chat />
       },
       {
         path: '/image-recognition',
