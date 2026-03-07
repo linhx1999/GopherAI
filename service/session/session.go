@@ -24,19 +24,19 @@ var ctx = context.Background()
 const SystemPrompt = `你是一个智能助手，可以帮助用户解答各种问题。请用中文回答，保持回答简洁、准确、友好。`
 
 // saveMessageToDB 异步保存消息到数据库（通过 RabbitMQ）
-func saveMessageToDB(sessionID string, content string, userName string, isUser bool) {
-	data := rabbitmq.GenerateMessageMQParam(sessionID, content, userName, isUser)
+func saveMessageToDB(sessionID string, content string, userName string, role string) {
+	data := rabbitmq.GenerateMessageMQParam(sessionID, content, userName, role)
 	if err := rabbitmq.RMQMessage.Publish(data); err != nil {
 		log.Printf("saveMessageToDB error: %v", err)
 	}
 }
 
 // appendMessageToRedis 追加消息到 Redis 缓存
-func appendMessageToRedis(sessionID string, content string, isUser bool) error {
+func appendMessageToRedis(sessionID string, content string, role string) error {
 	msg := &model.Message{
 		SessionID: sessionID,
 		Content:   content,
-		IsUser:    isUser,
+		Role:      role,
 		CreatedAt: time.Now(),
 	}
 	return redis_cache.AppendMessage(sessionID, msg)
@@ -90,7 +90,7 @@ func buildMessages(history []*model.Message, userContent string) []*schema.Messa
 	// 添加历史消息
 	for _, m := range history {
 		role := schema.Assistant
-		if m.IsUser {
+		if m.Role == "user" {
 			role = schema.User
 		}
 		messages = append(messages, &schema.Message{
@@ -158,11 +158,11 @@ func CreateSessionAndSendMessage(userName string, userContent string) (string, s
 	}
 
 	// 5：保存消息
-	_ = appendMessageToRedis(createdSession.ID, userContent, true)
-	saveMessageToDB(createdSession.ID, userContent, userName, true)
+	_ = appendMessageToRedis(createdSession.ID, userContent, "user")
+	saveMessageToDB(createdSession.ID, userContent, userName, "user")
 
-	_ = appendMessageToRedis(createdSession.ID, aiResponse.Content, false)
-	saveMessageToDB(createdSession.ID, aiResponse.Content, userName, false)
+	_ = appendMessageToRedis(createdSession.ID, aiResponse.Content, "assistant")
+	saveMessageToDB(createdSession.ID, aiResponse.Content, userName, "assistant")
 
 	return createdSession.ID, aiResponse.Content, code.CodeSuccess
 }
@@ -207,8 +207,8 @@ func StreamMessageToExistingSession(userName string, sessionID string, userConte
 	messages := buildMessages(history, userContent)
 
 	// 4：保存用户消息
-	_ = appendMessageToRedis(sessionID, userContent, true)
-	saveMessageToDB(sessionID, userContent, userName, true)
+	_ = appendMessageToRedis(sessionID, userContent, "user")
+	saveMessageToDB(sessionID, userContent, userName, "user")
 
 	// 5：流式调用 LLM
 	var fullResponse string
@@ -237,8 +237,8 @@ func StreamMessageToExistingSession(userName string, sessionID string, userConte
 	flusher.Flush()
 
 	// 7：保存 AI 响应
-	_ = appendMessageToRedis(sessionID, fullResponse, false)
-	saveMessageToDB(sessionID, fullResponse, userName, false)
+	_ = appendMessageToRedis(sessionID, fullResponse, "assistant")
+	saveMessageToDB(sessionID, fullResponse, userName, "assistant")
 
 	return code.CodeSuccess
 }
@@ -262,8 +262,8 @@ func ChatSend(userName string, sessionID string, userContent string) (string, co
 	messages := buildMessages(history, userContent)
 
 	// 4：保存用户消息
-	_ = appendMessageToRedis(sessionID, userContent, true)
-	saveMessageToDB(sessionID, userContent, userName, true)
+	_ = appendMessageToRedis(sessionID, userContent, "user")
+	saveMessageToDB(sessionID, userContent, userName, "user")
 
 	// 5：调用 LLM 生成响应
 	aiResponse, err := client.Generate(ctx, messages)
@@ -273,29 +273,21 @@ func ChatSend(userName string, sessionID string, userContent string) (string, co
 	}
 
 	// 6：保存 AI 响应
-	_ = appendMessageToRedis(sessionID, aiResponse.Content, false)
-	saveMessageToDB(sessionID, aiResponse.Content, userName, false)
+	_ = appendMessageToRedis(sessionID, aiResponse.Content, "assistant")
+	saveMessageToDB(sessionID, aiResponse.Content, userName, "assistant")
 
 	return aiResponse.Content, code.CodeSuccess
 }
 
 // GetChatHistory 获取聊天历史
-func GetChatHistory(userName string, sessionID string) ([]model.History, code.Code) {
+func GetChatHistory(userName string, sessionID string) ([]*model.Message, code.Code) {
 	messages, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		log.Println("GetChatHistory error:", err)
 		return nil, code.CodeServerBusy
 	}
 
-	history := make([]model.History, 0, len(messages))
-	for _, msg := range messages {
-		history = append(history, model.History{
-			IsUser:  msg.IsUser,
-			Content: msg.Content,
-		})
-	}
-
-	return history, code.CodeSuccess
+	return messages, code.CodeSuccess
 }
 
 // ChatStreamSend 流式发送消息

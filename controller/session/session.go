@@ -38,7 +38,7 @@ type (
 
 	// ChatHistoryResponse 聊天历史响应
 	ChatHistoryResponse struct {
-		History []model.History `json:"history"`
+		Messages []*model.Message `json:"messages"`
 		controller.Response
 	}
 
@@ -184,14 +184,14 @@ func ChatHistory(c *gin.Context) {
 		return
 	}
 
-	history, code_ := session.GetChatHistory(userName, req.SessionID)
+	messages, code_ := session.GetChatHistory(userName, req.SessionID)
 	if code_ != code.CodeSuccess {
 		c.JSON(http.StatusOK, res.CodeOf(code_))
 		return
 	}
 
 	res.Success()
-	res.History = history
+	res.Messages = messages
 	c.JSON(http.StatusOK, res)
 }
 

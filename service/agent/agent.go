@@ -78,9 +78,7 @@ type AgentResult struct {
 
 // saveMessageToDB 异步保存消息到数据库（通过 RabbitMQ）
 func saveMessageToDB(sessionID string, content string, userName string, role string, toolCalls []model.ToolCall) {
-	// 转换为 isUser 格式（兼容旧逻辑）
-	isUser := role == "user"
-	data := rabbitmq.GenerateMessageMQParam(sessionID, content, userName, isUser)
+	data := rabbitmq.GenerateMessageMQParam(sessionID, content, userName, role)
 	if err := rabbitmq.RMQMessage.Publish(data); err != nil {
 		log.Printf("saveMessageToDB error: %v", err)
 	}
@@ -88,9 +86,7 @@ func saveMessageToDB(sessionID string, content string, userName string, role str
 
 // saveMessageToDBNew 异步保存消息到数据库（新格式）
 func saveMessageToDBNew(msg *model.Message) {
-	// 通过 RabbitMQ 异步保存
-	// TODO: 更新 RabbitMQ 消息格式以支持新字段
-	data := rabbitmq.GenerateMessageMQParam(msg.SessionID, msg.Content, msg.UserName, msg.Role == "user")
+	data := rabbitmq.GenerateMessageMQParam(msg.SessionID, msg.Content, msg.UserName, msg.Role)
 	if err := rabbitmq.RMQMessage.Publish(data); err != nil {
 		log.Printf("saveMessageToDBNew error: %v", err)
 	}

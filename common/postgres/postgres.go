@@ -55,82 +55,18 @@ func InitPostgres() error {
 	DB = db
 
 	// 启用 pgvector 扩展
-	if err := enablePgVector(); err != nil {
+	if err := DB.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
 		return fmt.Errorf("failed to enable pgvector: %w", err)
 	}
 
-	return migration()
-}
-
-// enablePgVector 启用 pgvector 扩展
-func enablePgVector() error {
-	return DB.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error
-}
-
-// migration 执行数据库迁移
-func migration() error {
-	// 先迁移其他表
-	if err := DB.AutoMigrate(
+	// 自动迁移数据库表
+	return DB.AutoMigrate(
 		new(model.User),
 		new(model.Session),
 		new(model.File),
 		new(model.DocumentChunk),
-	); err != nil {
-		return err
-	}
-
-	// 手动处理 messages 表的 index 列迁移
-	if err := migrateMessagesIndex(); err != nil {
-		return err
-	}
-
-	// 最后迁移 messages 表（其他列）
-	return DB.AutoMigrate(new(model.Message))
-}
-
-// migrateMessagesIndex 手动迁移 messages 表的 index 列
-func migrateMessagesIndex() error {
-	// 检查 index 列是否已存在
-	var indexExists bool
-	err := DB.Raw(`
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns 
-			WHERE table_name = 'messages' AND column_name = 'index'
-		)
-	`).Scan(&indexExists).Error
-	if err != nil {
-		return fmt.Errorf("failed to check index column: %w", err)
-	}
-
-	if indexExists {
-		return nil // 列已存在，无需迁移
-	}
-
-	// 添加可空的 index 列
-	if err := DB.Exec(`ALTER TABLE messages ADD COLUMN "index" bigint`).Error; err != nil {
-		return fmt.Errorf("failed to add index column: %w", err)
-	}
-
-	// 为现有数据设置正确的 index（按 session_id 和 created_at 排序）
-	if err := DB.Exec(`
-		UPDATE messages m
-		SET "index" = sub.row_num
-		FROM (
-			SELECT id, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) - 1 as row_num
-			FROM messages
-		) sub
-		WHERE m.id = sub.id
-	`).Error; err != nil {
-		return fmt.Errorf("failed to populate index values: %w", err)
-	}
-
-	// 设置 NOT NULL 约束
-	if err := DB.Exec(`ALTER TABLE messages ALTER COLUMN "index" SET NOT NULL`).Error; err != nil {
-		return fmt.Errorf("failed to set NOT NULL constraint: %w", err)
-	}
-
-	// 创建索引
-	return DB.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_session_index ON messages(session_id, "index")`).Error
+		new(model.Message),
+	)
 }
 
 // CreateVectorIndex 创建向量索引（IVFFlat 算法，余弦相似度）
