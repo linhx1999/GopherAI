@@ -35,13 +35,10 @@ const SessionSider = ({
 
   return (
     <div className="session-sider">
-      <div className="session-header">
-        <span>会话列表</span>
-        <Button type="primary" icon={<PlusOutlined />} onClick={onCreateSession} block>
-          新聊天
-        </Button>
-      </div>
       <Conversations
+        creation={{
+          onClick: onCreateSession,
+        }}
         items={conversationItems}
         activeKey={activeKey}
         onActiveChange={onSwitchSession}
