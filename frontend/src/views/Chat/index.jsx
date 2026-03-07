@@ -7,6 +7,7 @@ import InputArea from './components/InputArea'
 import useChat from './hooks/useChat'
 import { createRoleConfig } from './utils/helpers.jsx'
 import './index.css'
+import { theme } from 'antd';
 
 const { Sider, Content } = Layout
 
@@ -14,9 +15,13 @@ const { Sider, Content } = Layout
  * 聊天页面主布局
  */
 const Chat = () => {
+  const { token } = theme.useToken();
+  const style = {
+    height: '100vh',
+    background: token.colorBgContainer,
+    borderRadius: token.borderRadius,
+  };
   const {
-    // refs
-    bubbleListRef,
     // 基础状态
     selectedTools,
     isStreaming,
@@ -28,7 +33,6 @@ const Chat = () => {
     messages,
     sessions,
     activeKey,
-    isTempSession,
     editingSession,
     editTitle,
     // 会话操作
@@ -53,7 +57,7 @@ const Chat = () => {
   const roleConfig = useMemo(() => createRoleConfig(handleActionClick), [handleActionClick])
 
   return (
-    <Layout>
+    <Layout style={style}>
       <Sider>
         <SessionSider
           sessions={sessions}

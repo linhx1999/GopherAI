@@ -1,6 +1,7 @@
-import { Button, Input } from 'antd'
-import { PlusOutlined, EditOutlined, ShareAltOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Input } from 'antd'
+import { EditOutlined, ShareAltOutlined, DeleteOutlined } from '@ant-design/icons'
 import { Conversations } from '@ant-design/x'
+import { theme } from 'antd';
 
 /**
  * 左侧会话列表侧边栏
@@ -16,6 +17,12 @@ const SessionSider = ({
   onEditTitleChange,
   onConfirmRename
 }) => {
+  const { token } = theme.useToken();
+  const style = {
+    height: '100vh',
+    background: token.colorBgContainer,
+    borderRadius: token.borderRadius,
+  };
   // 会话列表项
   const conversationItems = sessions.map(session => ({
     key: session.id,
@@ -34,11 +41,11 @@ const SessionSider = ({
   }))
 
   return (
-    <div className="session-sider">
       <Conversations
         creation={{
           onClick: onCreateSession,
         }}
+        style={style}
         items={conversationItems}
         activeKey={activeKey}
         onActiveChange={onSwitchSession}
@@ -53,7 +60,6 @@ const SessionSider = ({
           onClick: (itemInfo) => onMenuClick(itemInfo, item.key)
         })}
       />
-    </div>
   )
 }
 

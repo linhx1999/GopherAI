@@ -3,20 +3,6 @@
   50% { transform: translateY(-20px) rotate(180deg); }
 }
 
-/* 左侧会话列表 */
-.session-sider {
-  height: 100vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: rgba(255, 255, 255, 0);
-  backdrop-filter: blur(15px);
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.08);
-  position: relative;
-  z-index: 2;
-}
-
 .conversations-list {
   flex: 1;
   overflow-y: auto;

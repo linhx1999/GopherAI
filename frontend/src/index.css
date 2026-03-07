@@ -70,18 +70,3 @@ a:hover {
 .fade-in {
   animation: fadeIn 0.3s ease-in-out;
 }
-
-/* 响应式布局 */
-@media (max-width: 768px) {
-  .session-sider {
-    width: 200px !important;
-    min-width: 200px !important;
-    max-width: 200px !important;
-  }
-}
-
-@media (max-width: 576px) {
-  .session-sider {
-    display: none;
-  }
-}
