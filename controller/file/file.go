@@ -12,97 +12,90 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type (
-	UploadFileResponse struct {
-		File *FileInfo `json:"file,omitempty"`
-		controller.Response
-	}
-
-	FileListResponse struct {
-		Files []FileInfo `json:"files,omitempty"`
-		controller.Response
-	}
-
-	FileInfo struct {
-		ID            uint   `json:"id"`
-		FileName      string `json:"file_name"`
-		FileSize      string `json:"file_size"`
-		FileSizeBytes int64  `json:"file_size_bytes"`
-		FileType      string `json:"file_type"`
-		CreatedAt     string `json:"created_at"`
-		ObjectName    string `json:"object_name,omitempty"`
-		IndexStatus   string `json:"index_status"`   // 索引状态：pending/indexing/indexed/failed
-		IndexMessage  string `json:"index_message"`  // 索引状态消息
-	}
-
-	DeleteFileResponse struct {
-		controller.Response
-	}
-
-	FileURLResponse struct {
-		URL string `json:"url,omitempty"`
-		controller.Response
-	}
-)
+type FileInfo struct {
+	ID            uint   `json:"id"`
+	FileName      string `json:"file_name"`
+	FileSize      string `json:"file_size"`
+	FileSizeBytes int64  `json:"file_size_bytes"`
+	FileType      string `json:"file_type"`
+	CreatedAt     string `json:"created_at"`
+	ObjectName    string `json:"object_name,omitempty"`
+	IndexStatus   string `json:"index_status"`  // 索引状态：pending/indexing/indexed/failed
+	IndexMessage  string `json:"index_message"` // 索引状态消息
+}
 
 // UploadRagFile 上传 RAG 文件
 func UploadRagFile(c *gin.Context) {
-	res := new(UploadFileResponse)
 	uploadedFile, err := c.FormFile("file")
 	if err != nil {
 		log.Println("FormFile fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
 	fileRecord, err := fileService.UploadRagFile(username, uploadedFile)
 	if err != nil {
 		log.Println("UploadFile fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.File = &FileInfo{
-		ID:            fileRecord.ID,
-		FileName:      fileRecord.FileName,
-		FileSize:      fileService.FormatFileSize(fileRecord.FileSize),
-		FileSizeBytes: fileRecord.FileSize,
-		FileType:      fileRecord.FileType,
-		CreatedAt:     fileService.FormatTime(fileRecord.CreatedAt),
-		ObjectName:    fileRecord.ObjectName,
-	}
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{FileInfo{
+			ID:            fileRecord.ID,
+			FileName:      fileRecord.FileName,
+			FileSize:      fileService.FormatFileSize(fileRecord.FileSize),
+			FileSizeBytes: fileRecord.FileSize,
+			FileType:      fileRecord.FileType,
+			CreatedAt:     fileService.FormatTime(fileRecord.CreatedAt),
+			ObjectName:    fileRecord.ObjectName,
+		}},
+	})
 }
 
 // GetFileList 获取用户文件列表
 func GetFileList(c *gin.Context) {
-	res := new(FileListResponse)
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
 	files, err := fileService.GetFileList(username)
 	if err != nil {
 		log.Println("GetFileList fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Files = make([]FileInfo, 0, len(files))
+	fileInfos := make([]interface{}, 0, len(files))
 	for _, f := range files {
-		res.Files = append(res.Files, FileInfo{
+		fileInfos = append(fileInfos, FileInfo{
 			ID:            f.ID,
 			FileName:      f.FileName,
 			FileSize:      fileService.FormatFileSize(f.FileSize),
@@ -113,16 +106,23 @@ func GetFileList(c *gin.Context) {
 			IndexMessage:  f.IndexMessage,
 		})
 	}
-	c.JSON(http.StatusOK, res)
+
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: fileInfos,
+	})
 }
 
 // DeleteFile 删除文件
 func DeleteFile(c *gin.Context) {
-	res := new(DeleteFileResponse)
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
@@ -131,27 +131,37 @@ func DeleteFile(c *gin.Context) {
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		log.Println("Invalid file ID: ", idStr)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	if err := fileService.DeleteFile(uint(id), username); err != nil {
 		log.Println("DeleteFile fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+	})
 }
 
 // GetFileURL 获取文件访问 URL
 func GetFileURL(c *gin.Context) {
-	res := new(FileURLResponse)
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
@@ -159,20 +169,28 @@ func GetFileURL(c *gin.Context) {
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		log.Println("Invalid file ID: ", idStr)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	url, err := fileService.GetFileURL(uint(id), username)
 	if err != nil {
 		log.Println("GetFileURL fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.URL = url
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"url": url}},
+	})
 }
 
 // DownloadFile 下载文件
@@ -180,7 +198,10 @@ func DownloadFile(c *gin.Context) {
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, gin.H{"code": code.CodeInvalidToken.Code(), "msg": code.CodeInvalidToken.Msg()})
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
@@ -188,14 +209,20 @@ func DownloadFile(c *gin.Context) {
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		log.Println("Invalid file ID: ", idStr)
-		c.JSON(http.StatusOK, gin.H{"code": code.CodeInvalidParams.Code(), "msg": code.CodeInvalidParams.Msg()})
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	reader, fileRecord, err := fileService.DownloadFileContent(uint(id), username)
 	if err != nil {
 		log.Println("DownloadFile fail ", err)
-		c.JSON(http.StatusOK, gin.H{"code": code.CodeServerBusy.Code(), "msg": code.CodeServerBusy.Msg()})
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 	defer reader.Close()
@@ -211,11 +238,13 @@ func DownloadFile(c *gin.Context) {
 
 // IndexFile 手动触发文件索引
 func IndexFile(c *gin.Context) {
-	res := new(controller.Response)
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
@@ -223,7 +252,10 @@ func IndexFile(c *gin.Context) {
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		log.Println("Invalid file ID: ", idStr)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
@@ -237,17 +269,21 @@ func IndexFile(c *gin.Context) {
 		}
 	}()
 
-	res.Success()
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+	})
 }
 
 // DeleteFileIndex 删除文件索引
 func DeleteFileIndex(c *gin.Context) {
-	res := new(controller.Response)
 	username := c.GetString("userName")
 	if username == "" {
 		log.Println("Username not found in context")
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidToken,
+			Msg:  code.CodeInvalidToken.Msg(),
+		})
 		return
 	}
 
@@ -255,7 +291,10 @@ func DeleteFileIndex(c *gin.Context) {
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		log.Println("Invalid file ID: ", idStr)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
@@ -264,10 +303,15 @@ func DeleteFileIndex(c *gin.Context) {
 
 	if err := ragSvc.DeleteIndex(uint(id)); err != nil {
 		log.Println("DeleteFileIndex fail: ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+	})
 }

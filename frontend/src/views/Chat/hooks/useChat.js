@@ -45,8 +45,8 @@ const useChat = () => {
   const loadSessions = useCallback(async () => {
     try {
       const response = await api.get(API_ENDPOINTS.SESSIONS)
-      if (response.data?.status_code === STATUS_CODES.SUCCESS) {
-        const sessionItems = (response.data.sessions || [])
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
+        const sessionItems = (response.data.data?.[0]?.sessions || [])
           .map(s => ({
             id: String(s.sessionId),
             title: s.title || `会话 ${s.sessionId}`,
@@ -69,8 +69,8 @@ const useChat = () => {
   const loadMessages = useCallback(async (sessionId) => {
     try {
       const response = await api.get(API_ENDPOINTS.AGENT_MESSAGES(sessionId))
-      if (response.data?.code === STATUS_CODES.SUCCESS && Array.isArray(response.data.data?.messages)) {
-        const historyMessages = response.data.data.messages.map(item => ({
+      if (response.data?.code === STATUS_CODES.SUCCESS && Array.isArray(response.data.data?.[0]?.messages)) {
+        const historyMessages = response.data.data[0].messages.map(item => ({
           key: String(item.index || generateMessageId()),
           role: item.role === 'user' ? MESSAGE_ROLES.USER : MESSAGE_ROLES.AI,
           content: item.content
@@ -112,7 +112,7 @@ const useChat = () => {
   const deleteSession = useCallback(async (sessionId) => {
     try {
       const response = await api.delete(API_ENDPOINTS.SESSION_DELETE(sessionId))
-      if (response.data?.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
         message.success('会话已删除')
         setSessions(prev => prev.filter(s => s.id !== sessionId))
         if (activeKey === sessionId) {
@@ -121,7 +121,7 @@ const useChat = () => {
           setMessages([])
         }
       } else {
-        message.error(response.data?.status_msg || '删除失败')
+        message.error(response.data?.msg || '删除失败')
       }
     } catch (error) {
       console.error('Delete session error:', error)
@@ -133,11 +133,11 @@ const useChat = () => {
   const updateSessionTitle = useCallback(async (sessionId, title) => {
     try {
       const response = await api.put(API_ENDPOINTS.SESSION_TITLE(sessionId), { title })
-      if (response.data?.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
         message.success('标题已更新')
         setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title } : s))
       } else {
-        message.error(response.data?.status_msg || '更新失败')
+        message.error(response.data?.msg || '更新失败')
       }
     } catch (error) {
       console.error('Update title error:', error)
@@ -377,7 +377,7 @@ const useChat = () => {
       const response = await api.post(API_ENDPOINTS.AGENT, payload)
 
       if (response.data?.code === STATUS_CODES.SUCCESS) {
-        const data = response.data.data || response.data
+        const data = response.data.data?.[0] || {}
         const aiContent = data.content || ''
         setMessages(prev => prev.map(m =>
           m.key === aiMessageId ? { ...m, content: aiContent, loading: false } : m
@@ -411,11 +411,11 @@ const useChat = () => {
       const response = await api.post(API_ENDPOINTS.FILE_UPLOAD, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      if (response.data?.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
         message.success(`${file.name} 上传成功`)
-        return response.data.file_id
+        return response.data.data?.[0]?.id || null
       } else {
-        message.error(response.data?.status_msg || '上传失败')
+        message.error(response.data?.msg || '上传失败')
         return null
       }
     } catch (error) {
@@ -514,18 +514,19 @@ const useChat = () => {
   const playTTS = useCallback(async (text) => {
     try {
       const response = await api.post(API_ENDPOINTS.TTS, { text })
-      if (response.data?.status_code === STATUS_CODES.SUCCESS && response.data.task_id) {
-        const taskId = response.data.task_id
+      if (response.data?.code === STATUS_CODES.SUCCESS && response.data.data?.[0]?.task_id) {
+        const taskId = response.data.data[0].task_id
         let attempts = 0
         while (attempts < 30) {
           const queryResponse = await api.get(API_ENDPOINTS.TTS_QUERY, { params: { task_id: taskId } })
-          if (queryResponse.data?.status_code === STATUS_CODES.SUCCESS) {
-            if (queryResponse.data.task_status === 'Success' && queryResponse.data.task_result) {
-              const audio = new Audio(queryResponse.data.task_result)
+          if (queryResponse.data?.code === STATUS_CODES.SUCCESS) {
+            const ttsData = queryResponse.data.data?.[0] || {}
+            if (ttsData.task_status === 'Success' && ttsData.task_result) {
+              const audio = new Audio(ttsData.task_result)
               audio.play()
               return
             }
-            if (queryResponse.data.task_status === 'Failed') {
+            if (ttsData.task_status === 'Failed') {
               message.error('语音合成失败')
               return
             }

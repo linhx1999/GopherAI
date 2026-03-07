@@ -61,18 +61,18 @@ const ImageRecognition = () => {
         }
       })
 
-      if (response.data?.class_name) {
+      if (response.data?.code === 1000 && response.data?.data?.[0]?.class_name) {
         const aiMessage = {
           id: Date.now().toString() + '_ai',
           role: 'assistant',
-          content: `识别结果: ${response.data.class_name}`
+          content: `识别结果: ${response.data.data[0].class_name}`
         }
         setMessages(prev => [...prev, aiMessage])
       } else {
         const errorMessage = {
           id: Date.now().toString() + '_ai',
           role: 'assistant',
-          content: `[错误] ${response.data?.status_msg || '识别失败'}`
+          content: `[错误] ${response.data?.msg || '识别失败'}`
         }
         setMessages(prev => [...prev, errorMessage])
       }

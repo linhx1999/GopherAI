@@ -22,7 +22,7 @@ const Register = () => {
     try {
       setCodeLoading(true)
       const response = await api.post('/user/captcha', { email })
-      if (response.data.status_code === 1000) {
+      if (response.data.code === 1000) {
         message.success('验证码发送成功')
         setCountdown(60)
         const timer = setInterval(() => {
@@ -35,7 +35,7 @@ const Register = () => {
           })
         }, 1000)
       } else {
-        message.error(response.data.status_msg || '验证码发送失败')
+        message.error(response.data.msg || '验证码发送失败')
       }
     } catch (error) {
       console.error('Send code error:', error)
@@ -53,11 +53,11 @@ const Register = () => {
         captcha: values.captcha,
         password: values.password
       })
-      if (response.data.status_code === 1000) {
+      if (response.data.code === 1000) {
         message.success('注册成功，请登录')
         navigate('/login')
       } else {
-        message.error(response.data.status_msg || '注册失败')
+        message.error(response.data.msg || '注册失败')
       }
     } catch (error) {
       console.error('Register error:', error)

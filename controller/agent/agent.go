@@ -22,16 +22,6 @@ type AgentRequest struct {
 	Stream         bool     `json:"stream"`           // 是否流式响应，默认 true
 }
 
-// AgentResponse 统一响应结构
-type AgentResponse struct {
-	SessionID    string           `json:"session_id"`
-	MessageIndex int              `json:"message_index"`
-	Role         string           `json:"role"`
-	Content      string           `json:"content"`
-	ToolCalls    []model.ToolCall `json:"tool_calls,omitempty"`
-	controller.Response
-}
-
 // MessageItem 消息项
 type MessageItem struct {
 	Index     int              `json:"index"`
@@ -39,18 +29,6 @@ type MessageItem struct {
 	Content   string           `json:"content"`
 	ToolCalls []model.ToolCall `json:"tool_calls,omitempty"`
 	CreatedAt string           `json:"created_at"`
-}
-
-// MessagesResponse 消息列表响应
-type MessagesResponse struct {
-	SessionID string        `json:"session_id"`
-	Messages  []MessageItem `json:"messages"`
-	Total     int           `json:"total"`
-}
-
-// ToolsResponse 工具列表响应
-type ToolsResponse struct {
-	Tools []tools.ToolInfo `json:"tools"`
 }
 
 // AgentHandler 统一 Agent 处理入口
@@ -63,9 +41,9 @@ func AgentHandler(c *gin.Context) {
 	userName := c.GetString("userName")
 
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": code.CodeInvalidParams,
-			"msg":  "Invalid parameters",
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  "Invalid parameters",
 		})
 		return
 	}
@@ -118,32 +96,43 @@ func handleStreamRequest(c *gin.Context, req *AgentRequest, userName string) {
 
 // handleSyncRequest 处理同步请求
 func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
-	res := new(AgentResponse)
-
 	// 重新生成场景
 	if req.RegenerateFrom != nil {
 		if req.SessionID == "" {
-			c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+			c.JSON(http.StatusOK, controller.Response{
+				Code: code.CodeInvalidParams,
+				Msg:  code.CodeInvalidParams.Msg(),
+			})
 			return
 		}
 		result, code_ := agentService.Regenerate(c.Request.Context(), userName, req.SessionID, *req.RegenerateFrom, req.Tools, nil, false)
 		if code_ != code.CodeSuccess {
-			c.JSON(http.StatusOK, res.CodeOf(code_))
+			c.JSON(http.StatusOK, controller.Response{
+				Code: code_,
+				Msg:  code_.Msg(),
+			})
 			return
 		}
-		res.Success()
-		res.SessionID = result.SessionID
-		res.MessageIndex = result.MessageIndex
-		res.Role = result.Role
-		res.Content = result.Content
-		res.ToolCalls = result.ToolCalls
-		c.JSON(http.StatusOK, res)
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeSuccess,
+			Msg:  code.CodeSuccess.Msg(),
+			Data: []interface{}{gin.H{
+				"session_id":    result.SessionID,
+				"message_index": result.MessageIndex,
+				"role":          result.Role,
+				"content":       result.Content,
+				"tool_calls":    result.ToolCalls,
+			}},
+		})
 		return
 	}
 
 	// 验证消息
 	if req.Message == "" {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
@@ -153,7 +142,10 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 		var code_ code.Code
 		sessionID, code_ = agentService.CreateSessionOnly(userName, req.Message)
 		if code_ != code.CodeSuccess {
-			c.JSON(http.StatusOK, res.CodeOf(code_))
+			c.JSON(http.StatusOK, controller.Response{
+				Code: code_,
+				Msg:  code_.Msg(),
+			})
 			return
 		}
 	}
@@ -161,17 +153,24 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 	// 正常对话
 	result, code_ := agentService.GenerateWithContext(c.Request.Context(), userName, sessionID, req.Message, req.Tools)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.SessionID = sessionID
-	res.MessageIndex = result.MessageIndex
-	res.Role = result.Role
-	res.Content = result.Content
-	res.ToolCalls = result.ToolCalls
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{
+			"session_id":    sessionID,
+			"message_index": result.MessageIndex,
+			"role":          result.Role,
+			"content":       result.Content,
+			"tool_calls":    result.ToolCalls,
+		}},
+	})
 }
 
 // GetMessages 获取消息列表
@@ -182,15 +181,15 @@ func GetMessages(c *gin.Context) {
 
 	messages, err := agentService.GetMessages(sessionID, userName)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": code.CodeServerBusy,
-			"msg":  "Failed to get messages",
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  "Failed to get messages",
 		})
 		return
 	}
 
 	// 转换为响应格式
-	items := make([]MessageItem, 0, len(messages))
+	items := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
 		item := MessageItem{
 			Index:     msg.Index,
@@ -204,13 +203,14 @@ func GetMessages(c *gin.Context) {
 		items = append(items, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": code.CodeSuccess,
-		"data": MessagesResponse{
-			SessionID: sessionID,
-			Messages:  items,
-			Total:     len(items),
-		},
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{
+			"session_id": sessionID,
+			"messages":   items,
+			"total":      len(items),
+		}},
 	})
 }
 
@@ -220,11 +220,10 @@ func GetTools(c *gin.Context) {
 	registry := tools.GetToolRegistry()
 	toolList := registry.ListAvailableTools(c.Request.Context())
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": code.CodeSuccess,
-		"data": ToolsResponse{
-			Tools: toolList,
-		},
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"tools": toolList}},
 	})
 }
 

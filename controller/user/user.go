@@ -3,7 +3,7 @@ package user
 import (
 	"GopherAI/common/code"
 	"GopherAI/controller"
-	"GopherAI/service/user"
+	userService "GopherAI/service/user"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,11 +15,6 @@ type (
 		Username string `json:"username"`
 		Password string `json:password`
 	}
-	// omitempty当字段为空的时候，不返回这个东西
-	LoginResponse struct {
-		controller.Response
-		Token string `json:"token,omitempty"`
-	}
 	//验证码由后端生成，存放到redis中，固然需要先发送一次请求CaptchaRequest,然后用返回的验证码
 	//邮箱以及密码进行注册，后续再将账号进行返回
 	RegisterRequest struct {
@@ -27,79 +22,87 @@ type (
 		Captcha  string `json:"captcha"`
 		Password string `json:"password"`
 	}
-	//注册成功之后，直接让其进行登录状态
-	RegisterResponse struct {
-		controller.Response
-		Token string `json:"token,omitempty"`
-	}
 
 	CaptchaRequest struct {
 		Email string `json:"email" binding:"required"`
 	}
-
-	CaptchaResponse struct {
-		controller.Response
-	}
 )
 
 func Login(c *gin.Context) {
-
 	req := new(LoginRequest)
-	res := new(LoginResponse)
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	token, code_ := user.Login(req.Username, req.Password)
+	token, code_ := userService.Login(req.Username, req.Password)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Token = token
-	c.JSON(http.StatusOK, res)
-
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"token": token}},
+	})
 }
 
 func Register(c *gin.Context) {
-
 	req := new(RegisterRequest)
-	res := new(RegisterResponse)
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	token, code_ := user.Register(req.Email, req.Password, req.Captcha)
+	token, code_ := userService.Register(req.Email, req.Password, req.Captcha)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Token = token
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"token": token}},
+	})
 }
 
 func HandleCaptcha(c *gin.Context) {
 	req := new(CaptchaRequest)
-	res := new(CaptchaResponse)
 	//解析参数
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	//给service层进行处理
-	code_ := user.SendCaptcha(req.Email)
+	code_ := userService.SendCaptcha(req.Email)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
-	//匿名字段，其实本身res.Success()调用就是res.Response.Success()
-	//res.Response.Success()
-	res.Success()
-	c.JSON(http.StatusOK, res)
+
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+	})
 }

@@ -10,30 +10,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type (
-	RecognizeImageResponse struct {
-		ClassName string `json:"class_name,omitempty"` // AI回答
-		controller.Response
-	}
-)
-
 func RecognizeImage(c *gin.Context) {
-	res := new(RecognizeImageResponse)
 	file, err := c.FormFile("image")
 	if err != nil {
 		log.Println("FormFile fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	className, err := image.RecognizeImage(file)
 	if err != nil {
 		log.Println("RecognizeImage fail ", err)
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.ClassName = className
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"class_name": className}},
+	})
 }

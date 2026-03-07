@@ -18,10 +18,10 @@ const FileManager = () => {
     setLoading(true)
     try {
       const response = await api.get(API_ENDPOINTS.FILE_LIST)
-      if (response.data.status_code === STATUS_CODES.SUCCESS) {
-        setFiles(response.data.files || [])
+      if (response.data.code === STATUS_CODES.SUCCESS) {
+        setFiles(response.data.data || [])
       } else {
-        message.error(response.data.status_msg || '获取文件列表失败')
+        message.error(response.data.msg || '获取文件列表失败')
       }
     } catch (error) {
       message.error('获取文件列表失败')
@@ -50,11 +50,11 @@ const FileManager = () => {
           'Content-Type': 'multipart/form-data'
         }
       })
-      if (response.data.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data.code === STATUS_CODES.SUCCESS) {
         message.success('文件上传成功')
         fetchFiles()
       } else {
-        message.error(response.data.status_msg || '文件上传失败')
+        message.error(response.data.msg || '文件上传失败')
       }
     } catch (error) {
       message.error('文件上传失败')
@@ -69,11 +69,11 @@ const FileManager = () => {
   const handleIndex = async (fileId) => {
     try {
       const response = await api.post(API_ENDPOINTS.FILE_INDEX(fileId))
-      if (response.data.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data.code === STATUS_CODES.SUCCESS) {
         message.success('索引任务已创建，请稍后查看状态')
         fetchFiles()
       } else {
-        message.error(response.data.status_msg || '创建索引失败')
+        message.error(response.data.msg || '创建索引失败')
       }
     } catch (error) {
       message.error('创建索引失败')
@@ -84,11 +84,11 @@ const FileManager = () => {
   const handleDeleteIndex = async (fileId) => {
     try {
       const response = await api.delete(API_ENDPOINTS.FILE_INDEX_DELETE(fileId))
-      if (response.data.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data.code === STATUS_CODES.SUCCESS) {
         message.success('索引删除成功')
         fetchFiles()
       } else {
-        message.error(response.data.status_msg || '删除索引失败')
+        message.error(response.data.msg || '删除索引失败')
       }
     } catch (error) {
       message.error('删除索引失败')
@@ -99,11 +99,11 @@ const FileManager = () => {
   const handleDeleteFile = async (fileId) => {
     try {
       const response = await api.delete(API_ENDPOINTS.FILE_DELETE(fileId))
-      if (response.data.status_code === STATUS_CODES.SUCCESS) {
+      if (response.data.code === STATUS_CODES.SUCCESS) {
         message.success('文件删除成功')
         fetchFiles()
       } else {
-        message.error(response.data.status_msg || '删除文件失败')
+        message.error(response.data.msg || '删除文件失败')
       }
     } catch (error) {
       message.error('删除文件失败')

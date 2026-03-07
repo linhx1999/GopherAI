@@ -8,38 +8,19 @@ import (
 
 	"GopherAI/common/code"
 	"GopherAI/controller"
-	"GopherAI/model"
-	"GopherAI/service/session"
+	sessionService "GopherAI/service/session"
 )
 
 type (
-	GetUserSessionsResponse struct {
-		controller.Response
-		Sessions []model.SessionInfo `json:"sessions,omitempty"`
-	}
-
 	// ChatSendRequest 聊天发送请求
 	ChatSendRequest struct {
 		Content   string `json:"content" binding:"required"` // 用户内容
 		SessionID string `json:"session_id"`                 // 会话ID（可选，为空则创建新会话）
 	}
 
-	// ChatSendResponse 聊天发送响应
-	ChatSendResponse struct {
-		Content   string `json:"content,omitempty"` // AI 响应内容
-		SessionID string `json:"session_id,omitempty"`
-		controller.Response
-	}
-
 	// ChatHistoryRequest 聊天历史请求
 	ChatHistoryRequest struct {
 		SessionID string `json:"session_id" binding:"required"`
-	}
-
-	// ChatHistoryResponse 聊天历史响应
-	ChatHistoryResponse struct {
-		Messages []*model.Message `json:"messages"`
-		controller.Response
 	}
 
 	// UpdateSessionTitleRequest 更新会话标题请求
@@ -49,40 +30,53 @@ type (
 )
 
 func GetUserSessionsByUserName(c *gin.Context) {
-	res := new(GetUserSessionsResponse)
 	userName := c.GetString("userName")
 
-	userSessions, err := session.GetUserSessionsByUserName(userName)
+	userSessions, err := sessionService.GetUserSessionsByUserName(userName)
 	if err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeServerBusy))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeServerBusy,
+			Msg:  code.CodeServerBusy.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Sessions = userSessions
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"sessions": userSessions}},
+	})
 }
 
 func CreateSessionAndSendMessage(c *gin.Context) {
 	req := new(ChatSendRequest)
-	res := new(ChatSendResponse)
 	userName := c.GetString("userName")
 
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	sessionID, aiContent, code_ := session.CreateSessionAndSendMessage(userName, req.Content)
+	sessionID, aiContent, code_ := sessionService.CreateSessionAndSendMessage(userName, req.Content)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Content = aiContent
-	res.SessionID = sessionID
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{
+			"content":    aiContent,
+			"session_id": sessionID,
+		}},
+	})
 }
 
 func CreateStreamSessionAndSendMessage(c *gin.Context) {
@@ -102,7 +96,7 @@ func CreateStreamSessionAndSendMessage(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 
 	// 创建会话并发送 session_id
-	sessionID, code_ := session.CreateStreamSessionOnly(userName, req.Content)
+	sessionID, code_ := sessionService.CreateStreamSessionOnly(userName, req.Content)
 	if code_ != code.CodeSuccess {
 		c.SSEvent("error", gin.H{"message": "Failed to create session"})
 		return
@@ -112,7 +106,7 @@ func CreateStreamSessionAndSendMessage(c *gin.Context) {
 	c.Writer.Flush()
 
 	// 流式响应
-	code_ = session.StreamMessageToExistingSession(userName, sessionID, req.Content, c.Writer)
+	code_ = sessionService.StreamMessageToExistingSession(userName, sessionID, req.Content, c.Writer)
 	if code_ != code.CodeSuccess {
 		c.SSEvent("error", gin.H{"message": "Failed to send message"})
 		return
@@ -121,29 +115,41 @@ func CreateStreamSessionAndSendMessage(c *gin.Context) {
 
 func ChatSend(c *gin.Context) {
 	req := new(ChatSendRequest)
-	res := new(ChatSendResponse)
 	userName := c.GetString("userName")
 
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	if req.SessionID == "" {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	aiContent, code_ := session.ChatSend(userName, req.SessionID, req.Content)
+	aiContent, code_ := sessionService.ChatSend(userName, req.SessionID, req.Content)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Content = aiContent
-	res.SessionID = req.SessionID
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{
+			"content":    aiContent,
+			"session_id": req.SessionID,
+		}},
+	})
 }
 
 func ChatStreamSend(c *gin.Context) {
@@ -167,7 +173,7 @@ func ChatStreamSend(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.Header("X-Accel-Buffering", "no")
 
-	code_ := session.ChatStreamSend(userName, req.SessionID, req.Content, c.Writer)
+	code_ := sessionService.ChatStreamSend(userName, req.SessionID, req.Content, c.Writer)
 	if code_ != code.CodeSuccess {
 		c.SSEvent("error", gin.H{"message": "Failed to send message"})
 		return
@@ -176,67 +182,91 @@ func ChatStreamSend(c *gin.Context) {
 
 func ChatHistory(c *gin.Context) {
 	req := new(ChatHistoryRequest)
-	res := new(ChatHistoryResponse)
 	userName := c.GetString("userName")
 
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	messages, code_ := session.GetChatHistory(userName, req.SessionID)
+	messages, code_ := sessionService.GetChatHistory(userName, req.SessionID)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	res.Messages = messages
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: []interface{}{gin.H{"messages": messages}},
+	})
 }
 
 func DeleteSession(c *gin.Context) {
-	res := new(controller.Response)
 	userName := c.GetString("userName")
 	sessionID := c.Param("id")
 
 	if sessionID == "" {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	code_ := session.DeleteSession(userName, sessionID)
+	code_ := sessionService.DeleteSession(userName, sessionID)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+	})
 }
 
 func UpdateSessionTitle(c *gin.Context) {
-	res := new(controller.Response)
 	userName := c.GetString("userName")
 	sessionID := c.Param("sessionId")
 
 	if sessionID == "" {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
 	req := new(UpdateSessionTitleRequest)
 	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code.CodeInvalidParams,
+			Msg:  code.CodeInvalidParams.Msg(),
+		})
 		return
 	}
 
-	code_ := session.UpdateSessionTitle(userName, sessionID, req.Title)
+	code_ := sessionService.UpdateSessionTitle(userName, sessionID, req.Title)
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, res.CodeOf(code_))
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
 		return
 	}
 
-	res.Success()
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+	})
 }

@@ -18,12 +18,12 @@ const Login = () => {
         username: values.username,
         password: values.password
       })
-      if (response.data.status_code === 1000) {
-        localStorage.setItem('token', response.data.token)
+      if (response.data.code === 1000) {
+        localStorage.setItem('token', response.data.data[0].token)
         message.success('登录成功')
         navigate('/menu')
       } else {
-        message.error(response.data.status_msg || '登录失败')
+        message.error(response.data.msg || '登录失败')
       }
     } catch (error) {
       console.error('Login error:', error)
