@@ -20,8 +20,8 @@ type (
 
 	// ChatSendRequest 聊天发送请求
 	ChatSendRequest struct {
-		Content   string `json:"content" binding:"required"`   // 用户内容
-		SessionID string `json:"session_id"`                   // 会话ID（可选，为空则创建新会话）
+		Content   string `json:"content" binding:"required"` // 用户内容
+		SessionID string `json:"session_id"`                 // 会话ID（可选，为空则创建新会话）
 	}
 
 	// ChatSendResponse 聊天发送响应
@@ -198,7 +198,7 @@ func ChatHistory(c *gin.Context) {
 func DeleteSession(c *gin.Context) {
 	res := new(controller.Response)
 	userName := c.GetString("userName")
-	sessionID := c.Param("sessionId")
+	sessionID := c.Param("id")
 
 	if sessionID == "" {
 		c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidParams))
