@@ -71,11 +71,11 @@ const useChat = () => {
   // 加载消息历史
   const loadMessages = useCallback(async (sessionId) => {
     try {
-      const response = await api.post(API_ENDPOINTS.CHAT_HISTORY, { sessionId })
-      if (response.data?.status_code === STATUS_CODES.SUCCESS && Array.isArray(response.data.history)) {
-        const historyMessages = response.data.history.map(item => ({
-          key: String(item.id || generateMessageId()),
-          role: item.is_user ? MESSAGE_ROLES.USER : MESSAGE_ROLES.AI,
+      const response = await api.get(API_ENDPOINTS.AGENT_MESSAGES(sessionId))
+      if (response.data?.code === STATUS_CODES.SUCCESS && Array.isArray(response.data.data?.messages)) {
+        const historyMessages = response.data.data.messages.map(item => ({
+          key: String(item.index || generateMessageId()),
+          role: item.role === 'user' ? MESSAGE_ROLES.USER : MESSAGE_ROLES.AI,
           content: item.content
         }))
         setMessages(historyMessages)
@@ -228,7 +228,7 @@ const useChat = () => {
       streaming: true
     }])
 
-    const url = `${API_BASE_URL}${API_ENDPOINTS.AGENT}`
+    const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT}`
     const body = {
       message: question,
       tools: selectedTools,

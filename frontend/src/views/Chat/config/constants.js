@@ -51,29 +51,29 @@ export const SESSION_MENU_ITEMS = [
 // ==================== API 配置 ====================
 export const API_ENDPOINTS = {
   // Agent 接口 - 统一的 RESTful 接口
-  AGENT: '/agent',                                      // POST: 发送消息/重新生成
-  AGENT_MESSAGES: (sessionId) => `/agent/${sessionId}/messages`, // GET: 获取消息列表
-  
+  AGENT: 'agent',                                      // POST: 发送消息/重新生成
+  AGENT_MESSAGES: (sessionId) => `agent/${sessionId}/messages`, // GET: 获取消息列表
+
   // 工具接口
-  TOOLS: '/tools',                                      // GET: 获取工具列表
-  
+  TOOLS: 'tools',                                      // GET: 获取工具列表
+
   // 会话接口
-  SESSIONS: '/sessions',                                // GET: 获取会话列表
-  SESSION_TITLE: (sessionId) => `/sessions/${sessionId}/title`, // PUT: 更新标题
-  SESSION_DELETE: (sessionId) => `/sessions/${sessionId}`,      // DELETE: 删除会话
-  
+  SESSIONS: 'sessions',                                // GET: 获取会话列表
+  SESSION_TITLE: (sessionId) => `sessions/${sessionId}/title`, // PUT: 更新标题
+  SESSION_DELETE: (sessionId) => `sessions/${sessionId}`,      // DELETE: 删除会话
+
   // 文件接口
-  FILE_UPLOAD: '/file/upload',
-  FILE_LIST: '/file/list',
-  FILE_DELETE: (fileId) => `/file/${fileId}`,
-  FILE_URL: (fileId) => `/file/url/${fileId}`,
-  FILE_DOWNLOAD: (fileId) => `/file/download/${fileId}`,
-  FILE_INDEX: (fileId) => `/file/index/${fileId}`,
-  FILE_INDEX_DELETE: (fileId) => `/file/index/${fileId}`,
-  
+  FILE_UPLOAD: 'file/upload',
+  FILE_LIST: 'file/list',
+  FILE_DELETE: (fileId) => `file/${fileId}`,
+  FILE_URL: (fileId) => `file/url/${fileId}`,
+  FILE_DOWNLOAD: (fileId) => `file/download/${fileId}`,
+  FILE_INDEX: (fileId) => `file/index/${fileId}`,
+  FILE_INDEX_DELETE: (fileId) => `file/index/${fileId}`,
+
   // TTS 接口
-  TTS: '/tts',
-  TTS_QUERY: '/tts/query',
+  TTS: 'tts',
+  TTS_QUERY: 'tts/query',
 }
 
 // ==================== SSE 事件类型 ====================
