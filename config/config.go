@@ -90,11 +90,15 @@ type Config struct {
 }
 
 type RedisKeyConfig struct {
-	CaptchaPrefix string
+	CaptchaPrefix    string
+	MessagePrefix    string // 消息历史缓存 key 前缀
+	MessageTTL       int    // 消息缓存过期时间（小时）
 }
 
 var DefaultRedisKeyConfig = RedisKeyConfig{
 	CaptchaPrefix: "captcha:%s",
+	MessagePrefix: "chat:messages:%s", // chat:messages:{sessionID}
+	MessageTTL:    2,                   // 2小时过期
 }
 
 var config *Config

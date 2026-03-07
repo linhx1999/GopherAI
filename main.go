@@ -1,14 +1,14 @@
 package main
 
 import (
-	"GopherAI/common/aihelper"
+	"GopherAI/common/llm"
 	"GopherAI/common/minio"
 	"GopherAI/common/postgres"
 	"GopherAI/common/rabbitmq"
 	"GopherAI/common/redis"
 	"GopherAI/config"
-	"GopherAI/dao/message"
 	"GopherAI/router"
+	"context"
 	"fmt"
 	"log"
 )
@@ -16,36 +16,6 @@ import (
 func StartServer(addr string, port int) error {
 	r := router.InitRouter()
 	return r.Run(fmt.Sprintf("%s:%d", addr, port))
-}
-
-// 从数据库加载消息并初始化 AIHelperManager
-func readDataFromDB() error {
-	manager := aihelper.GetGlobalManager()
-	// 从数据库读取所有消息
-	msgs, err := message.GetAllMessages()
-	if err != nil {
-		return err
-	}
-	// 遍历数据库消息
-	for i := range msgs {
-		m := &msgs[i]
-		//默认openai模型
-		modelType := "1"
-		config := make(map[string]interface{})
-
-		// 创建对应的 AIHelper
-		helper, err := manager.GetOrCreateAIHelper(m.UserName, m.SessionID, modelType, config)
-		if err != nil {
-			log.Printf("[readDataFromDB] failed to create helper for user=%s session=%s: %v", m.UserName, m.SessionID, err)
-			continue
-		}
-		log.Println("readDataFromDB init:  ", helper.SessionID)
-		// 添加消息到内存中(不开启存储功能)
-		helper.AddMessage(m.Content, m.UserName, m.IsUser, false)
-	}
-
-	log.Println("AIHelperManager init success ")
-	return nil
 }
 
 func main() {
@@ -60,10 +30,7 @@ func main() {
 	}
 	log.Println("postgres init success")
 
-	// 初始化 AIHelperManager
-	readDataFromDB()
-
-	// 初始化 Redis（仅用于验证码缓存）
+	// 初始化 Redis（用于验证码缓存和消息历史缓存）
 	redis.Init()
 	log.Println("redis init success")
 
@@ -77,6 +44,15 @@ func main() {
 		return
 	}
 	log.Println("minio init success")
+
+	// 初始化 LLM 客户端
+	client := llm.GetLLMClient()
+	if err := client.Init(context.Background()); err != nil {
+		log.Println("InitLLM error, " + err.Error())
+		// 不阻止服务启动，允许后续重试
+	} else {
+		log.Println("llm client init success")
+	}
 
 	err := StartServer(host, port)
 	if err != nil {
