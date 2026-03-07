@@ -1,5 +1,5 @@
 import { Input } from 'antd'
-import { EditOutlined, ShareAltOutlined, DeleteOutlined } from '@ant-design/icons'
+import { EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { Conversations } from '@ant-design/x'
 import { theme } from 'antd';
 
