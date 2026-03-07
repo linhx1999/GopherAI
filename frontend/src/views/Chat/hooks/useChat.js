@@ -19,7 +19,7 @@ const useChat = () => {
   const bubbleListRef = useRef(null)
 
   // 基础状态
-  const [selectedTools, setSelectedTools] = useState(['knowledge_search'])
+  const [selectedTools, setSelectedTools] = useState([])
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')

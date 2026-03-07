@@ -115,7 +115,7 @@ const InputArea = ({
               {/* 工具选择下拉菜单 */}
               <Dropdown
                 trigger={['click']}
-                dropdownRender={() => (
+                popupRender={() => (
                   <div style={{
                     padding: 12,
                     background: '#fff',
