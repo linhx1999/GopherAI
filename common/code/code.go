@@ -17,6 +17,8 @@ const (
 	CodeInvalidCaptcha   Code = 2008
 	CodeRecordNotFound   Code = 2009
 	CodeIllegalPassword  Code = 2010
+	CodeSessionNotFound  Code = 2011
+	CodeInvalidIndex     Code = 2012
 
 	CodeForbidden Code = 3001
 
@@ -42,6 +44,8 @@ var msg = map[Code]string{
 	CodeInvalidCaptcha:   "验证码错误",
 	CodeRecordNotFound:   "记录不存在",
 	CodeIllegalPassword:  "密码不合法",
+	CodeSessionNotFound:  "会话不存在",
+	CodeInvalidIndex:     "索引超出范围",
 
 	CodeForbidden: "权限不足",
 

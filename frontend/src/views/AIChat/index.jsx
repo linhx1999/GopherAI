@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Layout, Button, Select, Checkbox, App, Pagination, Input, Avatar, Typography, Badge } from 'antd'
+import { Layout, Button, Select, Checkbox, App, Pagination, Input, Avatar, Typography, Badge, Tooltip } from 'antd'
 import {
   RollbackOutlined,
   SyncOutlined,
@@ -14,20 +14,22 @@ import {
   UserOutlined,
   RobotOutlined,
   CloudUploadOutlined,
-  LinkOutlined
+  LinkOutlined,
+  ToolOutlined
 } from '@ant-design/icons'
 import { Conversations, Sender, Welcome, Bubble, Actions, Attachments } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
 import api, { API_BASE_URL } from '../../utils/api'
 import {
-  MODEL_OPTIONS,
+  TOOL_OPTIONS,
   MESSAGE_PAGE_SIZE,
   COLORS,
   MESSAGE_MAX_WIDTH,
   STATUS_CODES,
   API_ENDPOINTS,
   MESSAGE_ROLES,
-  SPECIAL_SESSIONS
+  SPECIAL_SESSIONS,
+  SSE_EVENT_TYPES
 } from './config/constants'
 import './index.css'
 
@@ -189,7 +191,7 @@ const AIChat = () => {
   const senderRef = useRef(null)
 
   // 基础状态
-  const [selectedModel, setSelectedModel] = useState('1')
+  const [selectedTools, setSelectedTools] = useState(['knowledge_search']) // 默认选择知识库检索
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')
@@ -216,21 +218,6 @@ const AIChat = () => {
     const start = (currentPage - 1) * MESSAGE_PAGE_SIZE
     return messages.slice(start, start + MESSAGE_PAGE_SIZE)
   }, [messages, currentPage])
-
-  // 动态生成模型选项（包括 RAG 文件选项）
-  const modelOptions = useMemo(() => {
-    const options = [...MODEL_OPTIONS]
-
-    // 添加 RAG 文件选项
-    indexedFiles.forEach(file => {
-      options.push({
-        label: `RAG - ${file.name}`,
-        value: `2-${file.id}`
-      })
-    })
-
-    return options
-  }, [indexedFiles])
 
   const canSyncHistory = activeKey && !isTempSession
 
@@ -456,8 +443,8 @@ const AIChat = () => {
     return { type: 'text', data }
   }, [])
 
-  // 流式发送消息
-  const sendStreamMessage = useCallback(async (question, isNewSession) => {
+  // 流式发送消息 - 使用新的统一 Agent 接口
+  const sendStreamMessage = useCallback(async (question, regenerateFrom = null) => {
     const aiMessageId = generateMessageId()
     setMessages(prev => [...prev, {
       key: aiMessageId,
@@ -467,34 +454,44 @@ const AIChat = () => {
       streaming: true
     }])
 
-    // fetch 不像 axios 自动加 baseURL，需要手动添加 API_BASE_URL 前缀
-    const endpoint = isNewSession || isTempSession
-      ? API_ENDPOINTS.CHAT_STREAM_NEW_SESSION
-      : API_ENDPOINTS.CHAT_STREAM
-    const url = `${API_BASE_URL}${endpoint}`
+    const url = `${API_BASE_URL}${API_ENDPOINTS.AGENT}`
 
-    const body = isNewSession || isTempSession
-      ? { question, modelType: selectedModel }
-      : { question, modelType: selectedModel, sessionId: activeKey }
+    // 构建请求体
+    const body = {
+      message: question,
+      tools: selectedTools,
+      stream: true
+    }
+    
+    // 如果有会话 ID 且不是临时会话
+    if (activeKey && !isTempSession) {
+      body.session_id = activeKey
+    }
+    
+    // 如果是重新生成
+    if (regenerateFrom !== null) {
+      body.regenerate_from = regenerateFrom
+    }
 
     let currentSessionId = activeKey
     let fullContent = ''
     let isFinalized = false
+    let messageIndex = 0
 
     // 更新消息内容的辅助函数
-    const updateMessageContent = (messageId, content) => {
+    const updateMessageContent = (content) => {
       setMessages(prev => prev.map(m =>
-        m.key === messageId ? { ...m, content, loading: false, streaming: true } : m
+        m.key === aiMessageId ? { ...m, content, loading: false, streaming: true } : m
       ))
     }
 
     // 完成消息的辅助函数
-    const finalizeMessage = (messageId) => {
+    const finalizeMessage = () => {
       if (isFinalized) return
       isFinalized = true
-      console.log('[SSE] Finalizing message:', messageId)
+      console.log('[SSE] Finalizing message')
       setMessages(prev => prev.map(m =>
-        m.key === messageId ? { ...m, loading: false, streaming: false } : m
+        m.key === aiMessageId ? { ...m, loading: false, streaming: false } : m
       ))
       setIsLoading(false)
     }
@@ -525,7 +522,6 @@ const AIChat = () => {
         }
 
         const chunk = decoder.decode(value, { stream: true })
-        console.log('[SSE] Received chunk:', chunk.length, 'bytes')
         buffer += chunk
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
@@ -534,45 +530,84 @@ const AIChat = () => {
           const parsed = parseSSELine(line)
           if (!parsed) continue
 
-          if (parsed.type === 'done') {
-            console.log('[SSE] Received DONE signal')
-            finalizeMessage(aiMessageId)
-          } else if (parsed.type === 'json') {
-            if (parsed.data.sessionId) {
-              currentSessionId = String(parsed.data.sessionId)
-              console.log('[SSE] Received sessionId:', currentSessionId)
-              handleSessionCreated(currentSessionId)
+          // 处理结构化 SSE 事件
+          if (parsed.type === 'json' && parsed.data.type) {
+            const event = parsed.data
+            
+            switch (event.type) {
+              case SSE_EVENT_TYPES.META:
+                // 元信息事件：包含 session_id 和 message_index
+                if (event.session_id) {
+                  currentSessionId = String(event.session_id)
+                  messageIndex = event.message_index || 0
+                  console.log('[SSE] Meta:', { sessionId: currentSessionId, messageIndex })
+                  handleSessionCreated(currentSessionId)
+                }
+                break
+                
+              case SSE_EVENT_TYPES.TOOL_CALL:
+                // 工具调用事件
+                console.log('[SSE] Tool call:', event)
+                // 可以在这里显示工具调用状态
+                break
+                
+              case SSE_EVENT_TYPES.CONTENT_DELTA:
+                // 内容增量事件
+                if (event.content) {
+                  fullContent += event.content
+                  updateMessageContent(fullContent)
+                }
+                break
+                
+              case SSE_EVENT_TYPES.MESSAGE_END:
+                // 消息结束事件
+                console.log('[SSE] Message end:', event.status)
+                finalizeMessage()
+                break
+                
+              case SSE_EVENT_TYPES.ERROR:
+                // 错误事件
+                console.error('[SSE] Error:', event)
+                setMessages(prev => prev.map(m =>
+                  m.key === aiMessageId ? { 
+                    ...m, 
+                    loading: false, 
+                    streaming: false, 
+                    content: fullContent + '\n\n[错误: ' + (event.message || '未知错误') + ']' 
+                  } : m
+                ))
+                setIsLoading(false)
+                return
+                
+              default:
+                console.log('[SSE] Unknown event type:', event.type)
             }
+          } else if (parsed.type === 'done') {
+            // 兼容旧格式
+            finalizeMessage()
+          } else if (parsed.type === 'json' && parsed.data.sessionId) {
+            // 兼容旧格式：JSON 中包含 sessionId
+            currentSessionId = String(parsed.data.sessionId)
+            handleSessionCreated(currentSessionId)
           } else if (parsed.type === 'text') {
-            console.log('[SSE] Received text chunk:', parsed.data)
+            // 兼容旧格式：纯文本
             fullContent += parsed.data
-            console.log('[SSE] Full content length:', fullContent.length)
-            updateMessageContent(aiMessageId, fullContent)
+            updateMessageContent(fullContent)
           }
         }
       }
 
       // 处理 buffer 中剩余的数据
       if (buffer.trim()) {
-        console.log('[SSE] Processing remaining buffer:', buffer)
         const parsed = parseSSELine(buffer)
-        if (parsed) {
-          if (parsed.type === 'done') {
-            finalizeMessage(aiMessageId)
-          } else if (parsed.type === 'json' && parsed.data.sessionId) {
-            currentSessionId = String(parsed.data.sessionId)
-            handleSessionCreated(currentSessionId)
-          } else if (parsed.type === 'text') {
-            fullContent += parsed.data
-            updateMessageContent(aiMessageId, fullContent)
-          }
+        if (parsed && parsed.type === 'json' && parsed.data.type === SSE_EVENT_TYPES.MESSAGE_END) {
+          finalizeMessage()
         }
       }
 
-      // 如果还没有 finalize（可能没有收到 [DONE]），现在 finalize
+      // 如果还没有 finalize，现在 finalize
       if (!isFinalized) {
-        console.log('[SSE] Stream ended without DONE, finalizing')
-        finalizeMessage(aiMessageId)
+        finalizeMessage()
       }
     } catch (err) {
       console.error('Stream error:', err)
@@ -584,10 +619,10 @@ const AIChat = () => {
       }
       message.error('流式传输出错: ' + err.message)
     }
-  }, [selectedModel, activeKey, isTempSession, handleSessionCreated, parseSSELine, message])
+  }, [selectedTools, activeKey, isTempSession, handleSessionCreated, parseSSELine, message])
 
-  // 非流式发送消息
-  const sendNormalMessage = useCallback(async (question, isNewSession) => {
+  // 非流式发送消息 - 使用新的统一 Agent 接口
+  const sendNormalMessage = useCallback(async (question, regenerateFrom = null) => {
     const aiMessageId = generateMessageId()
     setMessages(prev => [...prev, {
       key: aiMessageId,
@@ -596,29 +631,36 @@ const AIChat = () => {
       loading: true
     }])
 
-    const endpoint = isNewSession || isTempSession
-      ? API_ENDPOINTS.CHAT_SEND_NEW_SESSION
-      : API_ENDPOINTS.CHAT_SEND
-
-    const payload = isNewSession || isTempSession
-      ? { question, modelType: selectedModel }
-      : { question, modelType: selectedModel, sessionId: activeKey }
+    // 构建请求体
+    const payload = {
+      message: question,
+      tools: selectedTools,
+      stream: false
+    }
+    
+    if (activeKey && !isTempSession) {
+      payload.session_id = activeKey
+    }
+    
+    if (regenerateFrom !== null) {
+      payload.regenerate_from = regenerateFrom
+    }
 
     try {
-      const response = await api.post(endpoint, payload)
+      const response = await api.post(API_ENDPOINTS.AGENT, payload)
 
-      if (response.data?.status_code === STATUS_CODES.SUCCESS) {
-        const aiContent = response.data.Information || response.data.information || ''
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
+        const data = response.data.data || response.data
+        const aiContent = data.content || ''
         setMessages(prev => prev.map(m =>
           m.key === aiMessageId ? { ...m, content: aiContent, loading: false } : m
         ))
 
-        if (isNewSession || isTempSession) {
-          const sessionId = String(response.data.sessionId)
-          handleSessionCreated(sessionId)
+        if (data.session_id) {
+          handleSessionCreated(data.session_id)
         }
       } else {
-        message.error(response.data?.status_msg || '发送失败')
+        message.error(response.data?.msg || '发送失败')
         setMessages(prev => prev.map(m =>
           m.key === aiMessageId ? { ...m, loading: false, content: '发送失败' } : m
         ))
@@ -632,7 +674,7 @@ const AIChat = () => {
     }
 
     setIsLoading(false)
-  }, [selectedModel, activeKey, isTempSession, handleSessionCreated, message])
+  }, [selectedTools, activeKey, isTempSession, handleSessionCreated, message])
 
   // 附件上传处理
   const handleAttachmentUpload = useCallback(async (file) => {
@@ -664,7 +706,6 @@ const AIChat = () => {
       return
     }
 
-    const isNewSession = !activeKey
     setIsLoading(true)
 
     // 上传附件
@@ -684,21 +725,23 @@ const AIChat = () => {
       messageContent = content ? `${content}\n\n[附件: ${fileNames}]` : `[附件: ${fileNames}]`
     }
 
-    // 添加用户消息
-    const userMessage = {
-      key: generateMessageId(),
-      role: MESSAGE_ROLES.USER,
-      content: messageContent
-    }
+    // 添加用户消息（如果不是重新生成）
+    if (options.regenerateFrom === undefined) {
+      const userMessage = {
+        key: generateMessageId(),
+        role: MESSAGE_ROLES.USER,
+        content: messageContent
+      }
 
-    if (options.replaceIndex !== undefined) {
-      setMessages(prev => {
-        const newMessages = prev.slice(0, options.replaceIndex)
-        newMessages.push(userMessage)
-        return newMessages
-      })
-    } else {
-      setMessages(prev => [...prev, userMessage])
+      if (options.replaceIndex !== undefined) {
+        setMessages(prev => {
+          const newMessages = prev.slice(0, options.replaceIndex)
+          newMessages.push(userMessage)
+          return newMessages
+        })
+      } else {
+        setMessages(prev => [...prev, userMessage])
+      }
     }
 
     setInputValue('')
@@ -721,16 +764,16 @@ const AIChat = () => {
 
     try {
       if (isStreaming) {
-        await sendStreamMessage(messageContent, isNewSession)
+        await sendStreamMessage(messageContent, options.regenerateFrom)
       } else {
-        await sendNormalMessage(messageContent, isNewSession)
+        await sendNormalMessage(messageContent, options.regenerateFrom)
       }
       bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
     } catch (err) {
       console.error('Send message error:', err)
       message.error('发送失败，请重试')
     }
-  }, [activeKey, messages.length, isStreaming, sendStreamMessage, sendNormalMessage, message, attachments, handleAttachmentUpload])
+  }, [messages.length, isStreaming, sendStreamMessage, sendNormalMessage, message, attachments, handleAttachmentUpload])
 
   // 重试
   const handleRetry = useCallback((msg) => {
@@ -905,13 +948,11 @@ const AIChat = () => {
           <Button icon={<SyncOutlined />} onClick={handleSyncHistory} disabled={!canSyncHistory}>
             同步历史
           </Button>
-          <span>选择模型：</span>
-          <Select
-            value={selectedModel}
-            onChange={setSelectedModel}
-            options={modelOptions}
-            style={{ width: 200 }}
-            placeholder="选择模型"
+          <span><ToolOutlined /> 工具：</span>
+          <Checkbox.Group
+            value={selectedTools}
+            onChange={setSelectedTools}
+            options={TOOL_OPTIONS}
           />
           <Checkbox checked={isStreaming} onChange={(e) => setIsStreaming(e.target.checked)}>
             流式响应

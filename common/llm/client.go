@@ -129,3 +129,10 @@ func (c *LLMClient) Stream(ctx context.Context, messages []*schema.Message, cb S
 func ConvertMessages(messages []*model.Message) []*schema.Message {
 	return utils.ConvertToSchemaMessages(messages)
 }
+
+// GetModel 获取底层模型（用于 React Agent）
+func (c *LLMClient) GetModel() eino_model.ToolCallingChatModel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.llm
+}

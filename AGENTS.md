@@ -46,8 +46,8 @@ GopherAI/
 │   └── config.go           # 配置加载逻辑
 ├── model/                  # 数据模型定义
 │   ├── user.go             # 用户模型
-│   ├── session.go          # 会话模型
-│   ├── message.go          # 消息模型
+│   ├── session.go          # 会话模型（含 tools 字段）
+│   ├── message.go          # 消息模型（含 index、role、tool_calls 字段）
 │   ├── file.go             # 文件模型
 │   └── document_chunk.go   # 文档分块模型（RAG 向量存储）
 ├── dao/                    # 数据访问层
@@ -70,7 +70,7 @@ GopherAI/
 │   └── tts/
 ├── router/                 # 路由注册
 │   ├── router.go           # 路由初始化
-│   ├── AI.go               # AI 相关路由
+│   ├── agent.go            # Agent 相关路由（统一接口）
 │   ├── Image.go            # 图像相关路由
 │   ├── File.go             # 文件相关路由
 │   └── user.go             # 用户相关路由
@@ -120,45 +120,47 @@ GopherAI/
 
 ## 核心架构
 
-### 1. AIHelper 模块 (核心)
+### 1. Agent Manager 模块 (核心)
 
-AIHelper 是项目的核心组件，实现了用户会话与 AI 模型的绑定关系：
+Agent Manager 是项目的核心组件，基于 CloudWeGo Eino 的 React Agent 实现：
 
 ```
-用户 → 多个会话 → 每个会话一个 AIHelper → AIHelper 绑定一个 AIModel
+用户请求 → 选择工具 → Agent Manager 创建/获取 Agent → React Agent 执行工具调用 → 生成响应
 ```
 
-**关键文件**: `common/aihelper/`
+**关键文件**: `common/agent/`
 
 | 文件 | 职责 |
 |------|------|
-| `aihelper.go` | AIHelper 实体，管理消息历史、同步/流式生成响应 |
-| `manager.go` | AIHelperManager，管理 `用户 → 会话 → AIHelper` 的映射 |
-| `model.go` | AIModel 接口实现：OpenAI、Ollama、RAG、MCP |
-| `factory.go` | 根据模型类型创建对应的 AIModel |
+| `manager.go` | AgentManager，管理 Agent 实例、动态工具加载、流式响应 |
+| `tools/registry.go` | 工具注册表，管理内置工具和 MCP 工具 |
+| `tools/rag_tool.go` | RAG 知识库检索工具 |
+| `tools/mcp_tool.go` | MCP 工具封装（使用官方 eino-ext 实现） |
 
-**AIModel 接口**:
-```go
-type AIModel interface {
-    GenerateResponse(ctx context.Context, messages []*schema.Message) (*schema.Message, error)
-    StreamResponse(ctx context.Context, messages []*schema.Message, cb StreamCallback) (string, error)
-    GetModelType() string
-}
-```
-
-**支持的模型类型**:
-- `"1"`: OpenAI 兼容模型 (通过环境变量配置)
-- `"2"`: 阿里云 RAG 模型 (检索增强生成)
-- `"3"`: MCP 模型 (集成外部工具)
-- `"4"`: Ollama 本地模型
+**动态工具加载**:
+- 根据请求中的 `tools` 参数动态创建 Agent
+- 支持 `knowledge_search`、`sequential_thinking`、MCP 工具
 
 ### 2. 消息存储流程
 
 ```
-用户消息 → AIHelper.AddMessage() → RabbitMQ 消息队列 → 异步写入 PostgreSQL
+用户消息 → Agent 执行 → SSE 流式响应 → 保存消息到 Redis 缓存 → RabbitMQ 异步写入 PostgreSQL
 ```
 
 消息通过 RabbitMQ 异步存储，避免阻塞主流程。
+
+**消息模型**:
+```go
+type Message struct {
+    ID        uint            // 主键
+    SessionID string          // 会话 ID
+    Index     int             // 线性索引（用于重新生成）
+    Role      string          // user/assistant
+    Content   string          // 消息内容
+    ToolCalls json.RawMessage // 工具调用记录
+    CreatedAt time.Time
+}
+```
 
 ### 3. RAG 流程
 
@@ -171,7 +173,6 @@ type AIModel interface {
 - `common/postgres/postgres.go` - PostgreSQL + pgvector 初始化
 - `model/document_chunk.go` - 文档分块向量模型
 - `service/rag/rag.go` - 文件索引服务
-- `common/aihelper/model.go` - RAG 模型实现
 
 **新特性**:
 - 支持文档切分（Markdown 标题切分、文本固定长度切分）
@@ -180,24 +181,39 @@ type AIModel interface {
 - 独立的文件管理页面
 - 使用 pgvector 进行向量存储和检索（IVFFlat 索引，余弦相似度）
 
-### 4. MCP 工具调用流程
+### 4. 工具系统
+
+**内置工具**:
+- `knowledge_search` - RAG 知识库检索
+- `sequential_thinking` - 逐步思考（使用官方 eino-ext 实现）
+
+**MCP 工具**:
+- 支持连接外部 MCP 服务器
+- 使用 `eino-ext/components/tool/mcp` 封装
+- 动态加载工具列表
+
+**工具注册表** (`common/agent/tools/registry.go`):
+```go
+// 获取工具列表
+tools := registry.GetToolsByNames(ctx, []string{"knowledge_search", "sequential_thinking"}, fileIDs)
+
+// 列出所有可用工具
+toolList := registry.ListAvailableTools(ctx)
+```
+
+### 5. MCP 服务
 
 ```
-用户问题 → LLM 判断是否需要工具 → 调用 MCP 工具 → 返回工具结果 → LLM 生成最终回答
+MCP Server → 注册工具 → HTTP SSE 接口 → MCP Client 连接 → 工具调用
 ```
 
 **示例工具**: 天气查询 (`common/mcp/server/server.go`)
 
-### 5. 文件存储流程
+### 6. 文件存储流程
 
 ```
 用户上传文件 → MinIO 对象存储 → 数据库记录元数据 → RAG 向量索引
 ```
-
-**关键文件**: `common/minio/minio.go`
-
-**文件操作**:
-- 上传：`UploadFile()` 上传到 MinIO，数据库记录元数据，创建 RAG 索引
 - 下载：`DownloadFile()` 从 MinIO 获取文件内容
 - 删除：`DeleteFile()` 删除 MinIO 对象、数据库记录、向量索引
 - 列表：`GetFileList()` 查询用户所有文件
@@ -215,17 +231,23 @@ type AIModel interface {
 
 ### 认证路由 (需要 JWT)
 
-**AI 对话**:
+**Agent 对话 (统一接口)**:
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/AI/chat/sessions` | 获取用户会话列表 |
-| POST | `/api/v1/AI/chat/send-new-session` | 创建新会话并发送消息 |
-| POST | `/api/v1/AI/chat/send` | 发送消息 (现有会话) |
-| POST | `/api/v1/AI/chat/history` | 获取会话历史 |
-| POST | `/api/v1/AI/chat/send-stream-new-session` | 创建新会话并发送消息 (流式) |
-| POST | `/api/v1/AI/chat/send-stream` | 发送消息 (流式) |
-| POST | `/api/v1/AI/chat/tts` | 创建 TTS 任务 |
-| GET | `/api/v1/AI/chat/tts/query` | 查询 TTS 任务状态 |
+| POST | `/api/v1/agent` | 发送消息/重新生成（支持流式/非流式） |
+| GET | `/api/v1/agent/:session_id/messages` | 获取消息列表 |
+
+**工具接口**:
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/tools` | 获取可用工具列表 |
+
+**会话管理**:
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/sessions` | 获取会话列表 |
+| DELETE | `/api/v1/sessions/:id` | 删除会话 |
+| PUT | `/api/v1/sessions/:id/title` | 更新会话标题 |
 
 **图像识别**:
 | 方法 | 路径 | 说明 |
@@ -242,6 +264,53 @@ type AIModel interface {
 | DELETE | `/api/v1/file/:id` | 删除文件 |
 | POST | `/api/v1/file/index/:id` | 手动触发文件索引 |
 | DELETE | `/api/v1/file/index/:id` | 删除文件索引 |
+
+### Agent 接口详细说明
+
+#### POST /api/v1/agent
+
+**请求体**:
+```json
+{
+  "session_id": "sess_001",           // [可选] 缺省时自动创建新会话
+  "message": "帮我查一下天气",         // [可选] 用户新消息（重新生成时可为空）
+  "regenerate_from": 3,               // [可选] 重新生成：从此索引截断
+  "tools": ["knowledge_search", "sequential_thinking"], // [可选] 工具配置
+  "stream": true                      // [可选] 是否流式响应，默认 true
+}
+```
+
+**响应体 (非流式)**:
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "session_id": "sess_001",
+    "message_index": 4,
+    "role": "assistant",
+    "content": "北京今天 25 度...",
+    "tool_calls": [...]
+  }
+}
+```
+
+**SSE 流式事件格式**:
+```
+data: {"type": "meta", "session_id": "sess_001", "message_index": 4}
+data: {"type": "tool_call", "tool_id": "knowledge_search", "function": "search", "arguments": {...}}
+data: {"type": "content_delta", "content": "北"}
+data: {"type": "content_delta", "content": "京"}
+data: {"type": "message_end", "status": "completed"}
+```
+
+### 可用工具
+
+| 工具名称 | 说明 |
+|----------|------|
+| `knowledge_search` | 从知识库检索相关文档 |
+| `sequential_thinking` | 逐步分析和解决复杂问题 |
+| MCP 工具 | 通过 MCP 服务器动态加载的工具 |
 
 ---
 

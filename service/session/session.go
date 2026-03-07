@@ -1,13 +1,6 @@
 package session
 
 import (
-	"GopherAI/common/code"
-	"GopherAI/common/llm"
-	"GopherAI/common/rabbitmq"
-	redis_cache "GopherAI/common/redis"
-	"GopherAI/dao/message"
-	"GopherAI/dao/session"
-	"GopherAI/model"
 	"context"
 	"log"
 	"net/http"
@@ -15,6 +8,14 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
+
+	"GopherAI/common/code"
+	"GopherAI/common/llm"
+	"GopherAI/common/rabbitmq"
+	redis_cache "GopherAI/common/redis"
+	"GopherAI/dao/message"
+	"GopherAI/dao/session"
+	"GopherAI/model"
 )
 
 var ctx = context.Background()
@@ -42,15 +43,12 @@ func appendMessageToRedis(sessionID string, content string, isUser bool) error {
 }
 
 // getMessagesFromRedis 从 Redis 获取消息历史（Cache-Aside 模式）
-// 先查 Redis，如果 miss 则从 PostgreSQL 加载并写入 Redis
 func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 	// 1. 先从 Redis 获取
 	messages, err := redis_cache.GetMessages(sessionID)
 	if err != nil {
 		log.Printf("getMessagesFromRedis redis error: %v", err)
-		// Redis 出错，降级到数据库
 	} else if len(messages) > 0 {
-		// Redis 命中，直接返回
 		return messages, nil
 	}
 
@@ -67,7 +65,7 @@ func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 		result = append(result, &dbMessages[i])
 	}
 
-	// 4. 写入 Redis 缓存（异步，不阻塞）
+	// 4. 写入 Redis 缓存（异步）
 	if len(result) > 0 {
 		go func() {
 			if err := redis_cache.CacheMessages(sessionID, result); err != nil {
@@ -80,7 +78,7 @@ func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 }
 
 // buildMessages 构建发送给 LLM 的消息列表
-func buildMessages(history []*model.Message, userQuestion string) []*schema.Message {
+func buildMessages(history []*model.Message, userContent string) []*schema.Message {
 	messages := make([]*schema.Message, 0, len(history)+2)
 
 	// 添加系统提示词
@@ -101,15 +99,16 @@ func buildMessages(history []*model.Message, userQuestion string) []*schema.Mess
 		})
 	}
 
-	// 添加当前用户问题
+	// 添加当前用户内容
 	messages = append(messages, &schema.Message{
 		Role:    schema.User,
-		Content: userQuestion,
+		Content: userContent,
 	})
 
 	return messages
 }
 
+// GetUserSessionsByUserName 获取用户会话列表
 func GetUserSessionsByUserName(userName string) ([]model.SessionInfo, error) {
 	sessions, err := session.GetSessionsByUserName(userName)
 	if err != nil {
@@ -117,11 +116,8 @@ func GetUserSessionsByUserName(userName string) ([]model.SessionInfo, error) {
 		return nil, err
 	}
 
-	log.Printf("GetUserSessionsByUserName: found %d sessions for user %s\n", len(sessions), userName)
-
 	var SessionInfos []model.SessionInfo
 	for _, s := range sessions {
-		log.Printf("Session: ID=%s, Title=%s\n", s.ID, s.Title)
 		SessionInfos = append(SessionInfos, model.SessionInfo{
 			SessionID: s.ID,
 			Title:     s.Title,
@@ -131,12 +127,13 @@ func GetUserSessionsByUserName(userName string) ([]model.SessionInfo, error) {
 	return SessionInfos, nil
 }
 
-func CreateSessionAndSendMessage(userName string, userQuestion string, modelType string) (string, string, code.Code) {
-	// 1：创建一个新的会话
+// CreateSessionAndSendMessage 创建新会话并发送消息（同步）
+func CreateSessionAndSendMessage(userName string, userContent string) (string, string, code.Code) {
+	// 1：创建新会话
 	newSession := &model.Session{
 		ID:       uuid.New().String(),
 		UserName: userName,
-		Title:    userQuestion,
+		Title:    userContent,
 	}
 	createdSession, err := session.CreateSession(newSession)
 	if err != nil {
@@ -146,9 +143,12 @@ func CreateSessionAndSendMessage(userName string, userQuestion string, modelType
 
 	// 2：获取 LLM 客户端
 	client := llm.GetLLMClient()
+	if client == nil {
+		return "", "", code.AIModelFail
+	}
 
-	// 3：构建消息（新会话只有系统提示词和用户问题）
-	messages := buildMessages([]*model.Message{}, userQuestion)
+	// 3：构建消息
+	messages := buildMessages([]*model.Message{}, userContent)
 
 	// 4：调用 LLM 生成响应
 	aiResponse, err := client.Generate(ctx, messages)
@@ -157,9 +157,9 @@ func CreateSessionAndSendMessage(userName string, userQuestion string, modelType
 		return "", "", code.AIModelFail
 	}
 
-	// 5：保存消息到 Redis 和数据库
-	_ = appendMessageToRedis(createdSession.ID, userQuestion, true)
-	saveMessageToDB(createdSession.ID, userQuestion, userName, true)
+	// 5：保存消息
+	_ = appendMessageToRedis(createdSession.ID, userContent, true)
+	saveMessageToDB(createdSession.ID, userContent, userName, true)
 
 	_ = appendMessageToRedis(createdSession.ID, aiResponse.Content, false)
 	saveMessageToDB(createdSession.ID, aiResponse.Content, userName, false)
@@ -167,21 +167,23 @@ func CreateSessionAndSendMessage(userName string, userQuestion string, modelType
 	return createdSession.ID, aiResponse.Content, code.CodeSuccess
 }
 
-func CreateStreamSessionOnly(userName string, userQuestion string) (string, code.Code) {
+// CreateStreamSessionOnly 仅创建会话（用于流式响应）
+func CreateStreamSessionOnly(userName string, title string) (string, code.Code) {
 	newSession := &model.Session{
 		ID:       uuid.New().String(),
 		UserName: userName,
-		Title:    userQuestion,
+		Title:    title,
 	}
 	createdSession, err := session.CreateSession(newSession)
 	if err != nil {
-		log.Println("CreateStreamSessionOnly CreateSession error:", err)
+		log.Println("CreateStreamSessionOnly error:", err)
 		return "", code.CodeServerBusy
 	}
 	return createdSession.ID, code.CodeSuccess
 }
 
-func StreamMessageToExistingSession(userName string, sessionID string, userQuestion string, modelType string, writer http.ResponseWriter) code.Code {
+// StreamMessageToExistingSession 流式发送消息到已有会话
+func StreamMessageToExistingSession(userName string, sessionID string, userContent string, writer http.ResponseWriter) code.Code {
 	flusher, ok := writer.(http.Flusher)
 	if !ok {
 		log.Println("StreamMessageToExistingSession: streaming unsupported")
@@ -190,8 +192,11 @@ func StreamMessageToExistingSession(userName string, sessionID string, userQuest
 
 	// 1：获取 LLM 客户端
 	client := llm.GetLLMClient()
+	if client == nil {
+		return code.AIModelFail
+	}
 
-	// 2：从 Redis 获取消息历史
+	// 2：获取消息历史
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		log.Println("StreamMessageToExistingSession getMessagesFromRedis error:", err)
@@ -199,11 +204,11 @@ func StreamMessageToExistingSession(userName string, sessionID string, userQuest
 	}
 
 	// 3：构建消息
-	messages := buildMessages(history, userQuestion)
+	messages := buildMessages(history, userContent)
 
-	// 4：先保存用户消息到 Redis 和数据库
-	_ = appendMessageToRedis(sessionID, userQuestion, true)
-	saveMessageToDB(sessionID, userQuestion, userName, true)
+	// 4：保存用户消息
+	_ = appendMessageToRedis(sessionID, userContent, true)
+	saveMessageToDB(sessionID, userContent, userName, true)
 
 	// 5：流式调用 LLM
 	var fullResponse string
@@ -231,32 +236,22 @@ func StreamMessageToExistingSession(userName string, sessionID string, userQuest
 	}
 	flusher.Flush()
 
-	// 7：保存 AI 响应到 Redis 和数据库
+	// 7：保存 AI 响应
 	_ = appendMessageToRedis(sessionID, fullResponse, false)
 	saveMessageToDB(sessionID, fullResponse, userName, false)
 
 	return code.CodeSuccess
 }
 
-func CreateStreamSessionAndSendMessage(userName string, userQuestion string, modelType string, writer http.ResponseWriter) (string, code.Code) {
-	sessionID, code_ := CreateStreamSessionOnly(userName, userQuestion)
-	if code_ != code.CodeSuccess {
-		return "", code_
-	}
-
-	code_ = StreamMessageToExistingSession(userName, sessionID, userQuestion, modelType, writer)
-	if code_ != code.CodeSuccess {
-		return sessionID, code_
-	}
-
-	return sessionID, code.CodeSuccess
-}
-
-func ChatSend(userName string, sessionID string, userQuestion string, modelType string) (string, code.Code) {
+// ChatSend 同步发送消息到已有会话
+func ChatSend(userName string, sessionID string, userContent string) (string, code.Code) {
 	// 1：获取 LLM 客户端
 	client := llm.GetLLMClient()
+	if client == nil {
+		return "", code.AIModelFail
+	}
 
-	// 2：从 Redis 获取消息历史
+	// 2：获取消息历史
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		log.Println("ChatSend getMessagesFromRedis error:", err)
@@ -264,11 +259,11 @@ func ChatSend(userName string, sessionID string, userQuestion string, modelType 
 	}
 
 	// 3：构建消息
-	messages := buildMessages(history, userQuestion)
+	messages := buildMessages(history, userContent)
 
-	// 4：先保存用户消息到 Redis 和数据库
-	_ = appendMessageToRedis(sessionID, userQuestion, true)
-	saveMessageToDB(sessionID, userQuestion, userName, true)
+	// 4：保存用户消息
+	_ = appendMessageToRedis(sessionID, userContent, true)
+	saveMessageToDB(sessionID, userContent, userName, true)
 
 	// 5：调用 LLM 生成响应
 	aiResponse, err := client.Generate(ctx, messages)
@@ -277,17 +272,18 @@ func ChatSend(userName string, sessionID string, userQuestion string, modelType 
 		return "", code.AIModelFail
 	}
 
-	// 6：保存 AI 响应到 Redis 和数据库
+	// 6：保存 AI 响应
 	_ = appendMessageToRedis(sessionID, aiResponse.Content, false)
 	saveMessageToDB(sessionID, aiResponse.Content, userName, false)
 
 	return aiResponse.Content, code.CodeSuccess
 }
 
+// GetChatHistory 获取聊天历史
 func GetChatHistory(userName string, sessionID string) ([]model.History, code.Code) {
 	messages, err := getMessagesFromRedis(sessionID)
 	if err != nil {
-		log.Println("GetChatHistory getMessagesFromRedis error:", err)
+		log.Println("GetChatHistory error:", err)
 		return nil, code.CodeServerBusy
 	}
 
@@ -302,15 +298,15 @@ func GetChatHistory(userName string, sessionID string) ([]model.History, code.Co
 	return history, code.CodeSuccess
 }
 
-func ChatStreamSend(userName string, sessionID string, userQuestion string, modelType string, writer http.ResponseWriter) code.Code {
-	return StreamMessageToExistingSession(userName, sessionID, userQuestion, modelType, writer)
+// ChatStreamSend 流式发送消息
+func ChatStreamSend(userName string, sessionID string, userContent string, writer http.ResponseWriter) code.Code {
+	return StreamMessageToExistingSession(userName, sessionID, userContent, writer)
 }
 
+// DeleteSession 删除会话
 func DeleteSession(userName string, sessionID string) code.Code {
-	// 1: 从 Redis 中删除消息缓存
 	_ = redis_cache.DeleteMessages(sessionID)
 
-	// 2: 从数据库中删除会话
 	err := session.DeleteSession(sessionID, userName)
 	if err != nil {
 		log.Println("DeleteSession error:", err)
@@ -320,8 +316,8 @@ func DeleteSession(userName string, sessionID string) code.Code {
 	return code.CodeSuccess
 }
 
+// UpdateSessionTitle 更新会话标题
 func UpdateSessionTitle(userName string, sessionID string, title string) code.Code {
-	log.Printf("UpdateSessionTitle: userName=%s, sessionID=%s, title=%s\n", userName, sessionID, title)
 	err := session.UpdateSessionTitle(sessionID, userName, title)
 	if err != nil {
 		log.Println("UpdateSessionTitle error:", err)

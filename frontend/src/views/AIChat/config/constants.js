@@ -33,11 +33,11 @@ export const COLORS = {
 
 export const MESSAGE_MAX_WIDTH = '80%'
 
-// ==================== 模型选项 ====================
-export const MODEL_OPTIONS = [
-  { label: 'Chat', value: '1' },
-  { label: 'RAG', value: '2' },
-  { label: 'MCP', value: '3' },
+// ==================== 工具选项 ====================
+export const TOOL_OPTIONS = [
+  { label: '知识库检索', value: 'knowledge_search' },
+  { label: '逐步思考', value: 'sequential_thinking' },
+  { label: '天气查询', value: 'get_weather' },
 ]
 
 // ==================== 会话菜单配置 ====================
@@ -50,17 +50,19 @@ export const SESSION_MENU_ITEMS = [
 
 // ==================== API 配置 ====================
 export const API_ENDPOINTS = {
-  CHAT_STREAM: '/AI/chat/send-stream',
-  CHAT_STREAM_NEW_SESSION: '/AI/chat/send-stream-new-session',
-  CHAT_SEND: '/AI/chat/send',
-  CHAT_SEND_NEW_SESSION: '/AI/chat/send-new-session',
-  CHAT_HISTORY: '/AI/chat/history',
-  SESSIONS: '/AI/chat/sessions',
-  SESSION_TITLE: (sessionId) => `/AI/chat/sessions/${sessionId}/title`,
-  SESSION_DELETE: (sessionId) => `/AI/chat/sessions/${sessionId}`,
-  SESSION_SUMMARIZE: (sessionId) => `/AI/chat/sessions/${sessionId}/summarize`,
-  TTS: '/AI/chat/tts',
-  TTS_QUERY: '/AI/chat/tts/query',
+  // Agent 接口 - 统一的 RESTful 接口
+  AGENT: '/agent',                                      // POST: 发送消息/重新生成
+  AGENT_MESSAGES: (sessionId) => `/agent/${sessionId}/messages`, // GET: 获取消息列表
+  
+  // 工具接口
+  TOOLS: '/tools',                                      // GET: 获取工具列表
+  
+  // 会话接口
+  SESSIONS: '/sessions',                                // GET: 获取会话列表
+  SESSION_TITLE: (sessionId) => `/sessions/${sessionId}/title`, // PUT: 更新标题
+  SESSION_DELETE: (sessionId) => `/sessions/${sessionId}`,      // DELETE: 删除会话
+  
+  // 文件接口
   FILE_UPLOAD: '/file/upload',
   FILE_LIST: '/file/list',
   FILE_DELETE: (fileId) => `/file/${fileId}`,
@@ -68,6 +70,19 @@ export const API_ENDPOINTS = {
   FILE_DOWNLOAD: (fileId) => `/file/download/${fileId}`,
   FILE_INDEX: (fileId) => `/file/index/${fileId}`,
   FILE_INDEX_DELETE: (fileId) => `/file/index/${fileId}`,
+  
+  // TTS 接口
+  TTS: '/tts',
+  TTS_QUERY: '/tts/query',
+}
+
+// ==================== SSE 事件类型 ====================
+export const SSE_EVENT_TYPES = {
+  META: 'meta',
+  TOOL_CALL: 'tool_call',
+  CONTENT_DELTA: 'content_delta',
+  MESSAGE_END: 'message_end',
+  ERROR: 'error',
 }
 
 // ==================== 状态码 ====================

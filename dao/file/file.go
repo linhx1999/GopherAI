@@ -79,3 +79,12 @@ func UpdateIndexStatus(id uint, status string, message string) error {
 	}
 	return postgres.DB.Model(&model.File{}).Where("id = ?", id).Updates(updates).Error
 }
+
+// GetIndexedFileIDsByUserName 获取用户已索引文件的 ID 列表
+func GetIndexedFileIDsByUserName(userName string) ([]uint, error) {
+	var ids []uint
+	err := postgres.DB.Model(&model.File{}).
+		Where("user_name = ? AND index_status = ?", userName, "indexed").
+		Pluck("id", &ids).Error
+	return ids, err
+}
