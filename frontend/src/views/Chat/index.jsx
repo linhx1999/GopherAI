@@ -55,8 +55,8 @@ const Chat = () => {
   const roleConfig = useMemo(() => createRoleConfig(handleActionClick), [handleActionClick])
 
   return (
-    <Layout className="ai-chat-container">
-      <Sider width={280} className="session-sider">
+    <Layout>
+      <Sider>
         <SessionSider
           sessions={sessions}
           activeKey={activeKey}
