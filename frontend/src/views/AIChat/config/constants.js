@@ -35,9 +35,9 @@ export const MESSAGE_MAX_WIDTH = '80%'
 
 // ==================== 工具选项 ====================
 export const TOOL_OPTIONS = [
-  { label: '知识库检索', value: 'knowledge_search' },
-  { label: '逐步思考', value: 'sequential_thinking' },
-  { label: '天气查询', value: 'get_weather' },
+  { label: '知识库检索', value: 'knowledge_search', icon: 'SearchOutlined' },
+  { label: '逐步思考', value: 'sequential_thinking', icon: 'BulbOutlined' },
+  { label: '天气查询', value: 'get_weather', icon: 'CloudOutlined' },
 ]
 
 // ==================== 会话菜单配置 ====================

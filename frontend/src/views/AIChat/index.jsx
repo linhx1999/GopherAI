@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Layout, Button, Select, Checkbox, App, Pagination, Input, Avatar, Typography, Badge, Tooltip } from 'antd'
+import { Layout, Button, Checkbox, App, Pagination, Input, Avatar, Typography, Badge, Tooltip, Dropdown, Flex, Divider } from 'antd'
 import {
   RollbackOutlined,
   SyncOutlined,
@@ -15,7 +15,11 @@ import {
   RobotOutlined,
   CloudUploadOutlined,
   LinkOutlined,
-  ToolOutlined
+  ToolOutlined,
+  ThunderboltOutlined,
+  SearchOutlined,
+  BulbOutlined,
+  CloudOutlined
 } from '@ant-design/icons'
 import { Conversations, Sender, Welcome, Bubble, Actions, Attachments } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
@@ -35,6 +39,7 @@ import './index.css'
 
 const { Text } = Typography
 const { Sider, Content } = Layout
+const Switch = Sender.Switch
 
 // ID 生成器
 let idCounter = 0
@@ -196,8 +201,6 @@ const AIChat = () => {
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [fileList, setFileList] = useState([])
-  const [indexedFiles, setIndexedFiles] = useState([]) // 已索引的文件列表
 
   // 附件状态
   const [attachments, setAttachments] = useState([])
@@ -240,36 +243,10 @@ const AIChat = () => {
     }
   }, [])
 
-  // 加载文件列表
-  const loadFileList = useCallback(async () => {
-    try {
-      const response = await api.get(API_ENDPOINTS.FILE_LIST)
-      if (response.data?.status_code === STATUS_CODES.SUCCESS) {
-        const files = (response.data.files || []).map(f => ({
-          id: f.id,
-          name: f.file_name,
-          byte: f.file_size_bytes || 0,
-          fileType: f.file_type,
-          createdAt: f.created_at,
-          indexStatus: f.index_status,
-          indexMessage: f.index_message
-        }))
-        setFileList(files)
-
-        // 过滤出已索引的文件
-        const indexed = files.filter(f => f.indexStatus === 'indexed')
-        setIndexedFiles(indexed)
-      }
-    } catch (error) {
-      console.error('Load file list error:', error)
-    }
-  }, [])
-
   // 初始化加载
-  useState(() => {
+  useEffect(() => {
     loadSessions()
-    loadFileList()
-  }, [loadSessions, loadFileList])
+  }, [loadSessions])
 
   // 加载消息历史
   const loadMessages = useCallback(async (sessionId) => {
@@ -686,7 +663,6 @@ const AIChat = () => {
       })
       if (response.data?.status_code === STATUS_CODES.SUCCESS) {
         message.success(`${file.name} 上传成功`)
-        loadFileList()
         return response.data.file_id
       } else {
         message.error(response.data?.status_msg || '上传失败')
@@ -945,18 +921,6 @@ const AIChat = () => {
           <Button icon={<RollbackOutlined />} onClick={() => navigate('/menu')}>
             返回
           </Button>
-          <Button icon={<SyncOutlined />} onClick={handleSyncHistory} disabled={!canSyncHistory}>
-            同步历史
-          </Button>
-          <span><ToolOutlined /> 工具：</span>
-          <Checkbox.Group
-            value={selectedTools}
-            onChange={setSelectedTools}
-            options={TOOL_OPTIONS}
-          />
-          <Checkbox checked={isStreaming} onChange={(e) => setIsStreaming(e.target.checked)}>
-            流式响应
-          </Checkbox>
         </div>
 
         <div className="messages-container">
@@ -1007,17 +971,80 @@ const AIChat = () => {
           <Sender
             ref={senderRef}
             header={senderHeader}
-            prefix={
-              <Button
-                onClick={() => setAttachmentsOpen(!attachmentsOpen)}
-                icon={<LinkOutlined />}
-              />
-            }
             value={inputValue}
             onChange={setInputValue}
             onSubmit={handleSend}
             loading={isLoading}
+            suffix={false}
             placeholder="请输入你的问题..."
+            footer={(actionNode) => (
+              <Flex justify="space-between" align="center">
+                {/* 左侧控制区 */}
+                <Flex gap="small" align="center">
+                  {/* 附件按钮 */}
+                  <Button
+                    type="text"
+                    icon={<LinkOutlined />}
+                    onClick={() => setAttachmentsOpen(!attachmentsOpen)}
+                  />
+
+                  {/* 流式响应开关 */}
+                  <Switch
+                    value={isStreaming}
+                    checkedChildren="流式"
+                    unCheckedChildren="普通"
+                    onChange={setIsStreaming}
+                    icon={<ThunderboltOutlined />}
+                  />
+
+                  {/* 工具选择下拉菜单 */}
+                  <Dropdown
+                    trigger={['click']}
+                    popupRender={() => (
+                      <div style={{
+                        padding: 12,
+                        background: '#fff',
+                        borderRadius: 8,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                        minWidth: 160
+                      }}>
+                        <div style={{ marginBottom: 8, fontWeight: 500, color: '#666' }}>
+                          选择工具
+                        </div>
+                        <Checkbox.Group
+                          value={selectedTools}
+                          onChange={setSelectedTools}
+                          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                        >
+                          {TOOL_OPTIONS.map(tool => {
+                            const IconComponent = tool.icon === 'SearchOutlined' ? SearchOutlined :
+                              tool.icon === 'BulbOutlined' ? BulbOutlined : CloudOutlined
+                            return (
+                              <Checkbox key={tool.value} value={tool.value}>
+                                <Flex align="center" gap={4}>
+                                  <IconComponent />
+                                  {tool.label}
+                                </Flex>
+                              </Checkbox>
+                            )
+                          })}
+                        </Checkbox.Group>
+                      </div>
+                    )}
+                  >
+                    <Switch value={selectedTools.length > 0} icon={<ToolOutlined />}>
+                      工具 {selectedTools.length > 0 && `(${selectedTools.length})`}
+                    </Switch>
+                  </Dropdown>
+
+                </Flex>
+
+                {/* 右侧提交区 */}
+                <Flex align="center">
+                  {actionNode}
+                </Flex>
+              </Flex>
+            )}
           />
         </div>
       </Content>
