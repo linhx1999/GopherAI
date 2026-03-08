@@ -63,12 +63,21 @@ const ProcessCard = ({ processes = [] }) => {
 
 const AssistantBubble = ({ record, processes, onActionClick }) => {
   const message = record.message || {}
-  const [streamContent, isContentDone] = useStreamContent(message.content || '', { step: 3, interval: 30 })
-  const [streamReasoning, isReasoningDone] = useStreamContent(message.reasoning_content || '', { step: 3, interval: 30 })
-  const reasoningDisplayContent = isReasoningDone ? (message.reasoning_content || '') : streamReasoning
-  const answerDisplayContent = isContentDone ? (message.content || '') : streamContent
-  const isStreaming = record.pending && !isContentDone
-  const isReasoningStreaming = record.pending && !isReasoningDone
+  const shouldAnimate = record.renderMode === 'stream' && record.pending
+  const [streamContent, isContentDone] = useStreamContent(message.content || '', {
+    step: 3,
+    interval: 30,
+    enabled: shouldAnimate
+  })
+  const [streamReasoning, isReasoningDone] = useStreamContent(message.reasoning_content || '', {
+    step: 3,
+    interval: 30,
+    enabled: shouldAnimate
+  })
+  const reasoningDisplayContent = shouldAnimate && !isReasoningDone ? streamReasoning : (message.reasoning_content || '')
+  const answerDisplayContent = shouldAnimate && !isContentDone ? streamContent : (message.content || '')
+  const isStreaming = shouldAnimate && !isContentDone
+  const isReasoningStreaming = shouldAnimate && !isReasoningDone
   const showReasoning = Boolean(message.reasoning_content)
   const showAnswer = Boolean(message.content)
 

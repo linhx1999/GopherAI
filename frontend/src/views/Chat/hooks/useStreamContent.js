@@ -15,7 +15,7 @@ const scheduleStateUpdate = (updater) => {
  */
 function useStreamContent(
   content,
-  { step = 2, interval = 50 } = {}
+  { step = 2, interval = 50, enabled = true } = {}
 ) {
   const [streamContent, setStreamContent] = useState('')
   const [isDone, setIsDone] = useState(true)
@@ -69,6 +69,14 @@ function useStreamContent(
   useEffect(() => {
     targetRef.current = content || ''
 
+    if (!enabled) {
+      stopStream()
+      streamRef.current = content || ''
+      queueMicrotask(() => setStreamContent(content || ''))
+      scheduleStateUpdate(() => setIsDone(true))
+      return
+    }
+
     // 清空内容
     if (!content && streamRef.current) {
       queueMicrotask(() => setStreamContent(''))
@@ -95,7 +103,7 @@ function useStreamContent(
       scheduleStateUpdate(() => setIsDone(false))
       queueMicrotask(startStream)
     }
-  }, [content, startStream, stopStream])
+  }, [content, enabled, startStream, stopStream])
 
   // 清理定时器
   useEffect(() => {

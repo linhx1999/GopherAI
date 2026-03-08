@@ -17,12 +17,25 @@ import {
   parseSSELine
 } from '../utils/helpers.jsx'
 
-const createRecord = ({ key = generateMessageId(), index = null, message, pending = false, createdAt = null }) => ({
+const MESSAGE_RENDER_MODE = {
+  INSTANT: 'instant',
+  STREAM: 'stream'
+}
+
+const createRecord = ({
+  key = generateMessageId(),
+  index = null,
+  message,
+  pending = false,
+  createdAt = null,
+  renderMode = MESSAGE_RENDER_MODE.INSTANT
+}) => ({
   key,
   index,
   message,
   pending,
-  createdAt
+  createdAt,
+  renderMode
 })
 
 const useChat = () => {
@@ -78,7 +91,8 @@ const useChat = () => {
           index: item.index,
           message: item.message || {},
           pending: false,
-          createdAt: item.created_at
+          createdAt: item.created_at,
+          renderMode: MESSAGE_RENDER_MODE.INSTANT
         }))
         setMessages(historyMessages)
       } else {
@@ -233,7 +247,8 @@ const useChat = () => {
       const record = createRecord({
         index: nextMessageIndex,
         message: mergeSchemaMessageChunk({}, chunk),
-        pending: !isMessageFinished(chunk)
+        pending: !isMessageFinished(chunk),
+        renderMode: MESSAGE_RENDER_MODE.STREAM
       })
       if (nextMessageIndex !== null) {
         nextMessageIndex += 1
@@ -416,7 +431,8 @@ const useChat = () => {
     }
 
     const userRecord = createRecord({
-      message: { role: MESSAGE_ROLES.USER, content: messageContent }
+      message: { role: MESSAGE_ROLES.USER, content: messageContent },
+      renderMode: MESSAGE_RENDER_MODE.INSTANT
     })
     setMessages((prev) => [...prev, userRecord])
 
