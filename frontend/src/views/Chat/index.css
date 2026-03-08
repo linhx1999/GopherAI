@@ -94,6 +94,17 @@
   background: transparent;
 }
 
+.assistant-message {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-thinking {
+  max-width: 70%;
+  margin-left: 40px;
+}
+
 /* 分页容器 */
 .pagination-container {
   text-align: center;
@@ -222,5 +233,3 @@
   box-shadow: none;
   cursor: not-allowed;
 }
-
-

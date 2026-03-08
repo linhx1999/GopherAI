@@ -1,5 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
+const scheduleStateUpdate = (updater) => {
+  queueMicrotask(updater)
+}
+
 /**
  * 流式内容 Hook - 参考 Ant Design X 官方示例
  * 用于实现逐字显示的打字效果
@@ -14,8 +18,9 @@ function useStreamContent(
   { step = 2, interval = 50 } = {}
 ) {
   const [streamContent, setStreamContent] = useState('')
+  const [isDone, setIsDone] = useState(true)
   const streamRef = useRef('')
-  const doneRef = useRef(true)
+  const targetRef = useRef('')
   const timerRef = useRef(-1)
   const stepRef = useRef(step)
   const intervalRef = useRef(interval)
@@ -26,61 +31,76 @@ function useStreamContent(
     intervalRef.current = interval
   }, [step, interval])
 
+  const stopStream = useCallback(() => {
+    if (timerRef.current !== -1) {
+      clearInterval(timerRef.current)
+      timerRef.current = -1
+    }
+  }, [])
+
   // 流式开始函数
-  const startStream = useCallback((text) => {
-    doneRef.current = false
-    streamRef.current = ''
+  const startStream = useCallback(() => {
+    if (timerRef.current !== -1) return
     timerRef.current = setInterval(() => {
+      const text = targetRef.current
       const len = streamRef.current.length + stepRef.current
-      if (len <= text.length - 1) {
+
+      if (!text) {
+        setStreamContent('')
+        streamRef.current = ''
+        scheduleStateUpdate(() => setIsDone(true))
+        stopStream()
+        return
+      }
+
+      if (len < text.length) {
         const newContent = text.slice(0, len)
         setStreamContent(newContent)
         streamRef.current = newContent
       } else {
         setStreamContent(text)
         streamRef.current = text
-        doneRef.current = true
-        clearInterval(timerRef.current)
+        scheduleStateUpdate(() => setIsDone(true))
+        stopStream()
       }
     }, intervalRef.current)
-  }, [])
+  }, [stopStream])
 
   useEffect(() => {
-    // 内容相同，不处理
-    if (content === streamRef.current) return
+    targetRef.current = content || ''
 
     // 清空内容
     if (!content && streamRef.current) {
-      setStreamContent('')
-      doneRef.current = true
-      clearInterval(timerRef.current)
+      queueMicrotask(() => setStreamContent(''))
+      streamRef.current = ''
+      scheduleStateUpdate(() => setIsDone(true))
+      stopStream()
       return
     }
 
-    // 新内容开始流式
-    if (!streamRef.current && content) {
-      clearInterval(timerRef.current)
-      startStream(content)
-    } else if (content.indexOf(streamRef.current) !== 0) {
-      // 非起始子集认为是全新内容，重新开始流式
-      clearInterval(timerRef.current)
-      startStream(content)
+    if (!content) {
+      scheduleStateUpdate(() => setIsDone(true))
+      return
     }
-  }, [content, startStream])
+
+    // 非起始子集认为是全新内容，重新开始流式
+    if (!content.startsWith(streamRef.current)) {
+      stopStream()
+      streamRef.current = ''
+      scheduleStateUpdate(() => setIsDone(false))
+      queueMicrotask(() => setStreamContent(''))
+    }
+
+    if (content !== streamRef.current) {
+      scheduleStateUpdate(() => setIsDone(false))
+      queueMicrotask(startStream)
+    }
+  }, [content, startStream, stopStream])
 
   // 清理定时器
   useEffect(() => {
-    return () => clearInterval(timerRef.current)
-  }, [])
-
-  // 使用 state 来跟踪 done 状态
-  const [isDone, setIsDone] = useState(true)
-  useEffect(() => {
-    const checkDone = setInterval(() => {
-      setIsDone(doneRef.current)
-    }, 50)
-    return () => clearInterval(checkDone)
-  }, [])
+    return () => stopStream()
+  }, [stopStream])
 
   return [streamContent, isDone]
 }

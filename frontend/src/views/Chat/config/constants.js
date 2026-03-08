@@ -80,6 +80,8 @@ export const API_ENDPOINTS = {
 export const SSE_EVENT_TYPES = {
   META: 'meta',
   TOOL_CALL: 'tool_call',
+  REASONING_DELTA: 'reasoning_delta',
+  REASONING_END: 'reasoning_end',
   CONTENT_DELTA: 'content_delta',
   MESSAGE_END: 'message_end',
   ERROR: 'error',

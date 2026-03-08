@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { App } from 'antd'
 import api, { API_BASE_URL } from '../../../utils/api'
 import {
@@ -20,6 +20,7 @@ const useChat = () => {
 
   // 基础状态
   const [selectedTools, setSelectedTools] = useState([])
+  const [thinkingMode, setThinkingMode] = useState(false)
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')
@@ -73,7 +74,8 @@ const useChat = () => {
         const historyMessages = response.data.data[0].messages.map(item => ({
           key: String(item.index || generateMessageId()),
           role: item.role === 'user' ? MESSAGE_ROLES.USER : MESSAGE_ROLES.AI,
-          content: item.content
+          content: item.content,
+          reasoningContent: ''
         }))
         setMessages(historyMessages)
       } else {
@@ -212,6 +214,10 @@ const useChat = () => {
       key: aiMessageId,
       role: MESSAGE_ROLES.AI,
       content: '',
+      reasoningContent: '',
+      reasoningCompleted: !thinkingMode,
+      answerUnlocked: true,
+      thinkingMode,
       loading: true,
       streaming: true
     }])
@@ -220,6 +226,7 @@ const useChat = () => {
     const body = {
       message: question,
       tools: selectedTools,
+      thinking_mode: thinkingMode,
       stream: true
     }
     
@@ -231,22 +238,20 @@ const useChat = () => {
       body.regenerate_from = regenerateFrom
     }
 
-    let currentSessionId = activeKey
     let fullContent = ''
+    let fullReasoning = ''
     let isFinalized = false
 
-    const updateMessageContent = (content) => {
+    const updateMessage = (patch) => {
       setMessages(prev => prev.map(m =>
-        m.key === aiMessageId ? { ...m, content, loading: false, streaming: true } : m
+        m.key === aiMessageId ? { ...m, ...patch } : m
       ))
     }
 
     const finalizeMessage = () => {
       if (isFinalized) return
       isFinalized = true
-      setMessages(prev => prev.map(m =>
-        m.key === aiMessageId ? { ...m, loading: false, streaming: false } : m
-      ))
+      updateMessage({ loading: false, streaming: false })
       setIsLoading(false)
     }
 
@@ -287,19 +292,39 @@ const useChat = () => {
             switch (event.type) {
               case SSE_EVENT_TYPES.META:
                 if (event.session_id) {
-                  currentSessionId = String(event.session_id)
-                  handleSessionCreated(currentSessionId)
+                  handleSessionCreated(String(event.session_id))
                 }
                 break
                 
               case SSE_EVENT_TYPES.TOOL_CALL:
                 console.log('[SSE] Tool call:', event)
                 break
+
+              case SSE_EVENT_TYPES.REASONING_DELTA:
+                if (event.content) {
+                  fullReasoning += event.content
+                  updateMessage({
+                    answerUnlocked: false,
+                    reasoningContent: fullReasoning,
+                    reasoningCompleted: false,
+                    loading: false,
+                    streaming: true
+                  })
+                }
+                break
+
+              case SSE_EVENT_TYPES.REASONING_END:
+                updateMessage({
+                  reasoningCompleted: true,
+                  loading: false,
+                  streaming: true
+                })
+                break
                 
               case SSE_EVENT_TYPES.CONTENT_DELTA:
                 if (event.content) {
                   fullContent += event.content
-                  updateMessageContent(fullContent)
+                  updateMessage({ content: fullContent, loading: false, streaming: true })
                 }
                 break
                 
@@ -325,11 +350,10 @@ const useChat = () => {
           } else if (parsed.type === 'done') {
             finalizeMessage()
           } else if (parsed.type === 'json' && parsed.data.sessionId) {
-            currentSessionId = String(parsed.data.sessionId)
-            handleSessionCreated(currentSessionId)
+            handleSessionCreated(String(parsed.data.sessionId))
           } else if (parsed.type === 'text') {
             fullContent += parsed.data
-            updateMessageContent(fullContent)
+            updateMessage({ content: fullContent, loading: false, streaming: true })
           }
         }
       }
@@ -347,7 +371,7 @@ const useChat = () => {
       }
       message.error('流式传输出错: ' + err.message)
     }
-  }, [selectedTools, activeKey, isTempSession, handleSessionCreated, message])
+  }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, message])
 
   // 非流式发送消息
   const sendNormalMessage = useCallback(async (question, regenerateFrom = null) => {
@@ -356,12 +380,17 @@ const useChat = () => {
       key: aiMessageId,
       role: MESSAGE_ROLES.AI,
       content: '',
+      reasoningContent: '',
+      reasoningCompleted: !thinkingMode,
+      answerUnlocked: true,
+      thinkingMode,
       loading: true
     }])
 
     const payload = {
       message: question,
       tools: selectedTools,
+      thinking_mode: thinkingMode,
       stream: false
     }
     
@@ -379,8 +408,17 @@ const useChat = () => {
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         const data = response.data.data?.[0] || {}
         const aiContent = data.content || ''
+        const reasoningContent = data.reasoning_content || ''
         setMessages(prev => prev.map(m =>
-          m.key === aiMessageId ? { ...m, content: aiContent, loading: false } : m
+          m.key === aiMessageId ? {
+            ...m,
+            content: aiContent,
+            reasoningContent,
+            reasoningCompleted: true,
+            answerUnlocked: true,
+            loading: false,
+            streaming: false
+          } : m
         ))
 
         if (data.session_id) {
@@ -401,7 +439,7 @@ const useChat = () => {
     }
 
     setIsLoading(false)
-  }, [selectedTools, activeKey, isTempSession, handleSessionCreated, message])
+  }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, message])
 
   // 附件上传处理
   const handleAttachmentUpload = useCallback(async (file) => {
@@ -559,6 +597,18 @@ const useChat = () => {
     }
   }, [playTTS, handleRetry])
 
+  const handleReasoningDisplayComplete = useCallback((messageKey) => {
+    setMessages(prev => prev.map(item => {
+      if (item.key !== messageKey || item.answerUnlocked) {
+        return item
+      }
+      return {
+        ...item,
+        answerUnlocked: true,
+      }
+    }))
+  }, [])
+
   // 清理 blob URL
   useEffect(() => {
     return () => {
@@ -575,6 +625,7 @@ const useChat = () => {
     bubbleListRef,
     // 基础状态
     selectedTools,
+    thinkingMode,
     isStreaming,
     currentPage,
     inputValue,
@@ -596,8 +647,10 @@ const useChat = () => {
     // 消息操作
     handleSend,
     handleActionClick,
+    handleReasoningDisplayComplete,
     // 状态更新
     setSelectedTools,
+    setThinkingMode,
     setIsStreaming,
     setCurrentPage,
     setInputValue,

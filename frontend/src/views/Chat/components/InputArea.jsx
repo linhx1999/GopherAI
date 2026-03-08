@@ -21,12 +21,14 @@ const InputArea = ({
   inputValue,
   isLoading,
   selectedTools,
+  thinkingMode,
   isStreaming,
   attachments,
   attachmentsOpen,
   onInputChange,
   onSubmit,
   onSelectedToolsChange,
+  onThinkingModeChange,
   onStreamingChange,
   onAttachmentsChange,
   onAttachmentsOpenChange
@@ -111,6 +113,14 @@ const InputArea = ({
                 onChange={onStreamingChange}
                 icon={<ThunderboltOutlined />}
               />
+
+              <Switch
+                value={thinkingMode}
+                onChange={onThinkingModeChange}
+                icon={<BulbOutlined />}
+              >
+                思考
+              </Switch>
 
               {/* 工具选择下拉菜单 */}
               <Dropdown

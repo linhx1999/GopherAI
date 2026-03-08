@@ -2,7 +2,6 @@ import { Pagination } from 'antd'
 import { Welcome, Bubble } from '@ant-design/x'
 import StreamBubble from './MessageBubble'
 import { MESSAGE_PAGE_SIZE, MESSAGE_ROLES } from '../config/constants'
-import { createRoleConfig } from '../utils/helpers.jsx'
 
 /**
  * 消息列表容器（含分页）
@@ -12,6 +11,7 @@ const MessageList = ({
   currentPage,
   roleConfig,
   onActionClick,
+  onReasoningDisplayComplete,
   onPageChange
 }) => {
   // 分页后的消息
@@ -38,6 +38,7 @@ const MessageList = ({
                   key={item.key}
                   item={item}
                   onActionClick={onActionClick}
+                  onReasoningDisplayComplete={onReasoningDisplayComplete}
                 />
               )
             }
