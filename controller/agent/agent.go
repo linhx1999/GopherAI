@@ -57,44 +57,11 @@ func ChatHandler(c *gin.Context) {
 	stream := req.Stream
 	if stream {
 		setSSEHeaders(c)
-		events := make(chan agentService.SSEEvent)
-		go handleStreamRequest(c, events, req, userName)
-
-		c.Stream(func(w io.Writer) bool {
-			select {
-			// 监听客户端是否主动断开连接
-			case <-c.Request.Context().Done():
-				return false
-
-			// 接收大模型吐出的数据
-			case msg, ok := <-events:
-				if !ok {
-					// 通道关闭，说明大模型生成结束
-					// 按照 SSE 规范，通常会发送一个 [DONE] 标识，前端可以据此结束接收
-					c.SSEvent(ginSSEEventName, "[DONE]")
-					return false
-				}
-
-				// c.SSEvent 会自动帮你把数据包装成 SSE 的格式: "data: {msg}\n\n"
-				// 第一个参数是事件名（通常默认留空或者写 message），第二个参数是数据本身
-				c.SSEvent(ginSSEEventName, msg)
-				return true
-			}
-		})
-	} else {
-		handleSyncRequest(c, req, userName)
-	}
-}
-
-// handleStreamRequest 处理流式请求
-func handleStreamRequest(c *gin.Context, events chan<- agentService.SSEEvent, req *AgentRequest, userName string) {
-	defer close(events)
-
-	source := resolveStreamSource(c, req, userName)
-	if source == nil {
+		streamSSE(c, resolveStreamSource(c.Request.Context(), req, userName))
 		return
 	}
-	forwardSSEEvents(c.Request.Context(), events, source)
+
+	handleSyncRequest(c, req, userName)
 }
 
 // handleSyncRequest 处理同步请求
@@ -108,7 +75,7 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 			})
 			return
 		}
-		result, code_ := agentService.Regenerate(c, userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
+		result, code_ := agentService.Regenerate(c.Request.Context(), userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
 		if code_ != code.CodeSuccess {
 			c.JSON(http.StatusOK, controller.Response{
 				Code: code_,
@@ -239,19 +206,35 @@ func setSSEHeaders(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 }
 
-func singleSSEvent(event agentService.SSEEvent) <-chan agentService.SSEEvent {
+func streamSSE(c *gin.Context, events <-chan agentService.SSEEvent) {
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case <-c.Request.Context().Done():
+			return false
+		case msg, ok := <-events:
+			if !ok {
+				c.SSEvent(ginSSEEventName, "[DONE]")
+				return false
+			}
+			c.SSEvent(ginSSEEventName, msg)
+			return true
+		}
+	})
+}
+
+func oneShotSSEStream(event agentService.SSEEvent) <-chan agentService.SSEEvent {
 	events := make(chan agentService.SSEEvent, 1)
 	events <- event
 	close(events)
 	return events
 }
 
-func resolveStreamSource(c *gin.Context, req *AgentRequest, userName string) <-chan agentService.SSEEvent {
+func resolveStreamSource(ctx context.Context, req *AgentRequest, userName string) <-chan agentService.SSEEvent {
 	if req.RegenerateFrom != nil {
 		if req.SessionID == "" {
 			return errorEventStream(code.CodeInvalidParams, "session_id is required for regenerate")
 		}
-		handle, code_ := agentService.OpenRegenerateStream(c, userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
+		handle, code_ := agentService.OpenRegenerateStream(ctx, userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
 		if code_ != code.CodeSuccess {
 			return errorEventStream(code_, "")
 		}
@@ -262,29 +245,11 @@ func resolveStreamSource(c *gin.Context, req *AgentRequest, userName string) <-c
 		return errorEventStream(code.CodeInvalidParams, "message is required")
 	}
 
-	handle, code_ := agentService.OpenStreamWithMeta(c, userName, req.SessionID, req.Message, req.Tools, req.ThinkingMode)
+	handle, code_ := agentService.OpenStreamWithMeta(ctx, userName, req.SessionID, req.Message, req.Tools, req.ThinkingMode)
 	if code_ != code.CodeSuccess {
 		return errorEventStream(code_, "")
 	}
 	return handle.Events
-}
-
-func forwardSSEEvents(ctx context.Context, dst chan<- agentService.SSEEvent, src <-chan agentService.SSEEvent) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-src:
-			if !ok {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case dst <- event:
-			}
-		}
-	}
 }
 
 func errorEventStream(code_ code.Code, message string) <-chan agentService.SSEEvent {
@@ -292,5 +257,5 @@ func errorEventStream(code_ code.Code, message string) <-chan agentService.SSEEv
 	if errorMsg == "" {
 		errorMsg = fmt.Sprintf("Error code: %d", code_)
 	}
-	return singleSSEvent(agentService.NewErrorEvent(errorMsg))
+	return oneShotSSEStream(agentService.NewErrorEvent(errorMsg))
 }

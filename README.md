@@ -250,7 +250,7 @@ data: {"type":"reasoning_delta","content":"先确认问题约束..."}
 data: {"type":"reasoning_end","status":"completed"}
 ```
 
-后端基于 Eino 的 `agent.Stream(...).Recv()` 消费底层 `*schema.Message`。`common/agent` 统一完成流聚合，`service` 输出结构化事件 channel，`controller` 中的 `ChatHandler` 先创建事件 channel，再用 `go handleStreamRequest(...)` 把 service 事件转发进该 channel，最后统一调用 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时还会追加一个 `data: [DONE]` 结束标记。思维链和正文由不同 chunk 输出；服务端在收到第一个正文 chunk 前发送 `reasoning_end`，前端在本地逐字动画结束前不会回退到完整文本，因此思维链和正文都会保持连续流式展示。
+后端基于 Eino 的 `agent.Stream(...).Recv()` 消费底层 `*schema.Message`。`common/agent` 统一完成流聚合，`service` 输出结构化事件 channel，`controller` 中的 `ChatHandler` 直接消费该事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。思维链和正文由不同 chunk 输出；服务端在收到第一个正文 chunk 前发送 `reasoning_end`，前端在本地逐字动画结束前不会回退到完整文本，因此思维链和正文都会保持连续流式展示。
 消息缓存和异步落库都会保留 `index` 与 `tool_calls`，同步与流式两条路径共享同一份 assistant 聚合结果。
 
 ## 支持的 AI 模型

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	agentcommon "GopherAI/common/agent"
@@ -288,7 +287,7 @@ func GenerateWithContext(ctx context.Context, userName string, sessionID string,
 }
 
 // OpenStreamWithMeta 打开一个可供 controller 消费的 SSE 事件流。
-func OpenStreamWithMeta(c *gin.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+func OpenStreamWithMeta(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
 	if sessionID == "" {
 		var code_ code.Code
 		sessionID, code_ = CreateSessionOnly(userName, userContent)
@@ -297,10 +296,10 @@ func OpenStreamWithMeta(c *gin.Context, userName string, sessionID string, userC
 		}
 	}
 
-	return openStreamWithSession(c, userName, sessionID, userContent, toolNames, thinkingMode)
+	return openStreamWithSession(ctx, userName, sessionID, userContent, toolNames, thinkingMode)
 }
 
-func openStreamWithSession(c *gin.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+func openStreamWithSession(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
 	agentMgr := agentcommon.GetAgentManager()
 
 	history, err := getMessagesFromRedis(sessionID)
@@ -373,7 +372,7 @@ func openStreamWithSession(c *gin.Context, userName string, sessionID string, us
 }
 
 // OpenRegenerateStream 打开重新生成的 SSE 事件流。
-func OpenRegenerateStream(c *gin.Context, userName string, sessionID string, fromIndex int, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+func OpenRegenerateStream(ctx context.Context, userName string, sessionID string, fromIndex int, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
 	if code_ := validateRegenerateSession(sessionID, fromIndex); code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -391,12 +390,11 @@ func OpenRegenerateStream(c *gin.Context, userName string, sessionID string, fro
 		return nil, code.CodeInvalidParams
 	}
 
-	return openStreamWithSession(c, userName, sessionID, lastUserContent, toolNames, thinkingMode)
+	return openStreamWithSession(ctx, userName, sessionID, lastUserContent, toolNames, thinkingMode)
 }
 
 // Regenerate 重新生成同步响应
-func Regenerate(c *gin.Context, userName string, sessionID string, fromIndex int, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
-	ctx := c.Request.Context()
+func Regenerate(ctx context.Context, userName string, sessionID string, fromIndex int, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
 	if code_ := validateRegenerateSession(sessionID, fromIndex); code_ != code.CodeSuccess {
 		return nil, code_
 	}

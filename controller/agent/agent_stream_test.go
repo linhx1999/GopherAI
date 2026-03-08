@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,22 +28,6 @@ func (r *closeNotifyRecorder) CloseNotify() <-chan bool {
 	return r.closeCh
 }
 
-func consumeStreamWithDone(c *gin.Context, events <-chan agentService.SSEEvent) {
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case <-c.Request.Context().Done():
-			return false
-		case msg, ok := <-events:
-			if !ok {
-				c.SSEvent(ginSSEEventName, "[DONE]")
-				return false
-			}
-			c.SSEvent(ginSSEEventName, msg)
-			return true
-		}
-	})
-}
-
 func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -52,7 +35,7 @@ func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
 
-	consumeStreamWithDone(c, singleSSEvent(agentService.SSEEvent{
+	streamSSE(c, oneShotSSEStream(agentService.SSEEvent{
 		Type:         agentService.SSEEventTypeMeta,
 		SessionID:    "sess_1",
 		MessageIndex: 1,
@@ -80,9 +63,7 @@ func TestHandleStreamRequestReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/stream", nil)
 
-	events := make(chan agentService.SSEEvent)
-	go handleStreamRequest(c, events, &AgentRequest{Stream: true}, "alice")
-
+	events := resolveStreamSource(c.Request.Context(), &AgentRequest{Stream: true}, "alice")
 	event, ok := <-events
 	if !ok {
 		t.Fatal("expected error event")
@@ -106,8 +87,7 @@ func TestHandleStreamRequestReturnsErrorEventWhenRegenerateSessionMissing(t *tes
 	c.Request = httptest.NewRequest(http.MethodPost, "/stream", nil)
 
 	from := 3
-	events := make(chan agentService.SSEEvent)
-	go handleStreamRequest(c, events, &AgentRequest{
+	events := resolveStreamSource(c.Request.Context(), &AgentRequest{
 		Stream:         true,
 		RegenerateFrom: &from,
 	}, "alice")
@@ -134,7 +114,7 @@ func TestErrorEventStreamCanBeConsumedByGinStream(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
 
-	consumeStreamWithDone(c, errorEventStream(code.CodeInvalidParams, "bad request"))
+	streamSSE(c, errorEventStream(code.CodeInvalidParams, "bad request"))
 
 	body := recorder.Body.String()
 	if !strings.Contains(body, "event:message") {
