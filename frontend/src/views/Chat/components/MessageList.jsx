@@ -1,7 +1,8 @@
 import { Pagination } from 'antd'
-import { Welcome, Bubble } from '@ant-design/x'
-import StreamBubble from './MessageBubble'
+import { Welcome, Bubble, Actions } from '@ant-design/x'
+import AssistantBubble, { ProcessCard } from './MessageBubble'
 import { MESSAGE_PAGE_SIZE, MESSAGE_ROLES } from '../config/constants'
+import { buildDisplayMessages, createMessageActions } from '../utils/helpers.jsx'
 
 /**
  * 消息列表容器（含分页）
@@ -11,12 +12,11 @@ const MessageList = ({
   currentPage,
   roleConfig,
   onActionClick,
-  onReasoningDisplayComplete,
   onPageChange
 }) => {
-  // 分页后的消息
+  const displayMessages = buildDisplayMessages(messages)
   const start = (currentPage - 1) * MESSAGE_PAGE_SIZE
-  const paginatedMessages = messages.slice(start, start + MESSAGE_PAGE_SIZE)
+  const paginatedMessages = displayMessages.slice(start, start + MESSAGE_PAGE_SIZE)
 
   if (messages.length === 0) {
     return (
@@ -31,38 +31,46 @@ const MessageList = ({
       <div className="messages-container">
         <div className="message-list-container">
           {paginatedMessages.map((item) => {
-            // AI 消息使用 StreamBubble 组件
-            if (item.role === MESSAGE_ROLES.AI) {
+            if (item.type === 'assistant') {
               return (
-                <StreamBubble
+                <AssistantBubble
                   key={item.key}
-                  item={item}
+                  record={item.record}
+                  processes={item.processes}
                   onActionClick={onActionClick}
-                  onReasoningDisplayComplete={onReasoningDisplayComplete}
                 />
               )
             }
-            // 其他消息使用标准 Bubble 组件
-            const config = roleConfig[item.role] || roleConfig.user
+
+            if (item.type === 'process') {
+              return <ProcessCard key={item.key} processes={item.processes} />
+            }
+
+            const record = item.record
+            const role = record.message?.role === MESSAGE_ROLES.SYSTEM ? MESSAGE_ROLES.SYSTEM : MESSAGE_ROLES.USER
+            const config = roleConfig[role] || roleConfig.user
             return (
               <Bubble
-                key={item.key}
+                key={record.key}
                 {...config}
-                content={item.content}
-                loading={item.loading}
+                content={record.message?.content}
+                loading={record.pending}
+                footer={role === MESSAGE_ROLES.USER && !record.pending ? (
+                  <Actions items={createMessageActions(true)} onClick={(info) => onActionClick(record, info)} />
+                ) : null}
               />
             )
           })}
         </div>
       </div>
 
-      {messages.length > MESSAGE_PAGE_SIZE && (
+      {displayMessages.length > MESSAGE_PAGE_SIZE && (
         <div className="pagination-container">
           <Pagination
             simple
             current={currentPage}
             onChange={onPageChange}
-            total={messages.length}
+            total={displayMessages.length}
             pageSize={MESSAGE_PAGE_SIZE}
             showSizeChanger={false}
           />

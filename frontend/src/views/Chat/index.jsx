@@ -45,7 +45,6 @@ const Chat = () => {
     // 消息操作
     handleSend,
     handleActionClick,
-    handleReasoningDisplayComplete,
     // 状态更新
     setSelectedTools,
     setThinkingMode,
@@ -57,7 +56,7 @@ const Chat = () => {
   } = useChat()
 
   // Role 配置
-  const roleConfig = useMemo(() => createRoleConfig(handleActionClick), [handleActionClick])
+  const roleConfig = useMemo(() => createRoleConfig(), [])
 
   return (
     <Layout style={style}>
@@ -83,7 +82,6 @@ const Chat = () => {
           currentPage={currentPage}
           roleConfig={roleConfig}
           onActionClick={handleActionClick}
-          onReasoningDisplayComplete={handleReasoningDisplayComplete}
           onPageChange={setCurrentPage}
         />
 

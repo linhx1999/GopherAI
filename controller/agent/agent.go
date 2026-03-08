@@ -11,7 +11,6 @@ import (
 	"GopherAI/common/agent/tools"
 	"GopherAI/common/code"
 	"GopherAI/controller"
-	"GopherAI/model"
 	agentService "GopherAI/service/agent"
 )
 
@@ -27,20 +26,8 @@ type AgentRequest struct {
 	Stream         bool     `json:"stream"`          // 是否流式响应，默认 true
 }
 
-// MessageItem 消息项
-type MessageItem struct {
-	Index     int              `json:"index"`
-	Role      string           `json:"role"`
-	Content   string           `json:"content"`
-	ToolCalls []model.ToolCall `json:"tool_calls,omitempty"`
-	CreatedAt string           `json:"created_at"`
-}
-
 // AgentHandler 统一 Agent 处理入口
 // POST /api/v1/agent
-// 支持两种场景：
-// 1. 正常对话：传入 message，可选传入 session_id 和 tools
-// 2. 重新生成：传入 session_id 和 regenerate_from
 func ChatHandler(c *gin.Context) {
 	req := new(AgentRequest)
 	userName := c.GetString("userName")
@@ -53,9 +40,7 @@ func ChatHandler(c *gin.Context) {
 		return
 	}
 
-	// 默认流式响应
-	stream := req.Stream
-	if stream {
+	if req.Stream {
 		setSSEHeaders(c)
 		streamSSE(c, resolveStreamSource(c.Request.Context(), req, userName))
 		return
@@ -64,9 +49,7 @@ func ChatHandler(c *gin.Context) {
 	handleSyncRequest(c, req, userName)
 }
 
-// handleSyncRequest 处理同步请求
 func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
-	// 重新生成场景
 	if req.RegenerateFrom != nil {
 		if req.SessionID == "" {
 			c.JSON(http.StatusOK, controller.Response{
@@ -87,18 +70,14 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 			Code: code.CodeSuccess,
 			Msg:  code.CodeSuccess.Msg(),
 			Data: []interface{}{gin.H{
-				"session_id":        result.SessionID,
-				"message_index":     result.MessageIndex,
-				"role":              result.Role,
-				"content":           result.Content,
-				"reasoning_content": result.ReasoningContent,
-				"tool_calls":        result.ToolCalls,
+				"session_id":    result.SessionID,
+				"message_index": result.MessageIndex,
+				"message":       result.Message,
 			}},
 		})
 		return
 	}
 
-	// 验证消息
 	if req.Message == "" {
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidParams,
@@ -107,7 +86,6 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 		return
 	}
 
-	// 创建会话（如果需要）
 	sessionID := req.SessionID
 	if sessionID == "" {
 		var code_ code.Code
@@ -121,7 +99,6 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 		}
 	}
 
-	// 正常对话
 	result, code_ := agentService.GenerateWithContext(c.Request.Context(), userName, sessionID, req.Message, req.Tools, req.ThinkingMode)
 	if code_ != code.CodeSuccess {
 		c.JSON(http.StatusOK, controller.Response{
@@ -135,12 +112,9 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
 		Data: []interface{}{gin.H{
-			"session_id":        sessionID,
-			"message_index":     result.MessageIndex,
-			"role":              result.Role,
-			"content":           result.Content,
-			"reasoning_content": result.ReasoningContent,
-			"tool_calls":        result.ToolCalls,
+			"session_id":    sessionID,
+			"message_index": result.MessageIndex,
+			"message":       result.Message,
 		}},
 	})
 }
@@ -160,28 +134,13 @@ func GetMessages(c *gin.Context) {
 		return
 	}
 
-	// 转换为响应格式
-	items := make([]interface{}, 0, len(messages))
-	for _, msg := range messages {
-		item := MessageItem{
-			Index:     msg.Index,
-			Role:      msg.Role,
-			Content:   msg.Content,
-			CreatedAt: msg.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		}
-		if msg.ToolCalls != nil {
-			item.ToolCalls = msg.GetToolCalls()
-		}
-		items = append(items, item)
-	}
-
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
 		Data: []interface{}{gin.H{
 			"session_id": sessionID,
-			"messages":   items,
-			"total":      len(items),
+			"messages":   messages,
+			"total":      len(messages),
 		}},
 	})
 }
@@ -206,7 +165,7 @@ func setSSEHeaders(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 }
 
-func streamSSE(c *gin.Context, events <-chan agentService.SSEEvent) {
+func streamSSE(c *gin.Context, events <-chan agentService.StreamEvent) {
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-c.Request.Context().Done():
@@ -216,20 +175,28 @@ func streamSSE(c *gin.Context, events <-chan agentService.SSEEvent) {
 				c.SSEvent(ginSSEEventName, "[DONE]")
 				return false
 			}
-			c.SSEvent(ginSSEEventName, msg)
+
+			switch {
+			case msg.Meta != nil:
+				c.SSEvent(ginSSEEventName, msg.Meta)
+			case msg.Error != nil:
+				c.SSEvent(ginSSEEventName, msg.Error)
+			case msg.Message != nil:
+				c.SSEvent(ginSSEEventName, msg.Message)
+			}
 			return true
 		}
 	})
 }
 
-func oneShotSSEStream(event agentService.SSEEvent) <-chan agentService.SSEEvent {
-	events := make(chan agentService.SSEEvent, 1)
+func oneShotSSEStream(event agentService.StreamEvent) <-chan agentService.StreamEvent {
+	events := make(chan agentService.StreamEvent, 1)
 	events <- event
 	close(events)
 	return events
 }
 
-func resolveStreamSource(ctx context.Context, req *AgentRequest, userName string) <-chan agentService.SSEEvent {
+func resolveStreamSource(ctx context.Context, req *AgentRequest, userName string) <-chan agentService.StreamEvent {
 	if req.RegenerateFrom != nil {
 		if req.SessionID == "" {
 			return errorEventStream(code.CodeInvalidParams, "session_id is required for regenerate")
@@ -252,7 +219,7 @@ func resolveStreamSource(ctx context.Context, req *AgentRequest, userName string
 	return handle.Events
 }
 
-func errorEventStream(code_ code.Code, message string) <-chan agentService.SSEEvent {
+func errorEventStream(code_ code.Code, message string) <-chan agentService.StreamEvent {
 	errorMsg := message
 	if errorMsg == "" {
 		errorMsg = fmt.Sprintf("Error code: %d", code_)

@@ -14,6 +14,7 @@ type MessageMQParam struct {
 	UserName  string          `json:"user_name"`
 	Role      string          `json:"role"` // user/assistant
 	Index     *int            `json:"index,omitempty"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
 	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
 }
 
@@ -23,6 +24,7 @@ func GenerateMessageMQParam(msg *model.Message) ([]byte, error) {
 		Content:   msg.Content,
 		UserName:  msg.UserName,
 		Role:      msg.Role,
+		Payload:   msg.Payload,
 		ToolCalls: msg.ToolCalls,
 	}
 	param.Index = &msg.Index
@@ -35,6 +37,7 @@ func buildMessageFromParam(param MessageMQParam) (*model.Message, bool) {
 		Content:   param.Content,
 		UserName:  param.UserName,
 		Role:      param.Role,
+		Payload:   param.Payload,
 		ToolCalls: param.ToolCalls,
 	}
 	if param.Index == nil {

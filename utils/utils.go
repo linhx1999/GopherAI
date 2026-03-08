@@ -42,25 +42,25 @@ func GenerateUUID() string {
 
 // 将 schema 消息转换为数据库可存储的格式
 func ConvertToModelMessage(sessionID string, userName string, msg *schema.Message) *model.Message {
-	return &model.Message{
+	stored := &model.Message{
 		SessionID: sessionID,
 		UserName:  userName,
-		Content:   msg.Content,
 	}
+	_ = stored.SetSchemaMessage(msg)
+	return stored
 }
 
 // 将数据库消息转换为 schema 消息（供 AI 使用）
 func ConvertToSchemaMessages(msgs []*model.Message) []*schema.Message {
 	schemaMsgs := make([]*schema.Message, 0, len(msgs))
 	for _, m := range msgs {
-		role := schema.Assistant
-		if m.Role == "user" {
-			role = schema.User
+		if m == nil {
+			continue
 		}
-		schemaMsgs = append(schemaMsgs, &schema.Message{
-			Role:    role,
-			Content: m.Content,
-		})
+		msg := m.GetSchemaMessage()
+		if msg != nil {
+			schemaMsgs = append(schemaMsgs, msg)
+		}
 	}
 	return schemaMsgs
 }

@@ -9,16 +9,26 @@ import {
   SPECIAL_SESSIONS,
   SSE_EVENT_TYPES
 } from '../config/constants'
-import { generateMessageId, parseSSELine } from '../utils/helpers.jsx'
+import {
+  generateMessageId,
+  isMessageFinished,
+  isSchemaMessagePayload,
+  mergeSchemaMessageChunk,
+  parseSSELine
+} from '../utils/helpers.jsx'
 
-/**
- * 聊天逻辑 Hook - 合并会话管理和消息发送逻辑
- */
+const createRecord = ({ key = generateMessageId(), index = null, message, pending = false, createdAt = null }) => ({
+  key,
+  index,
+  message,
+  pending,
+  createdAt
+})
+
 const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
 
-  // 基础状态
   const [selectedTools, setSelectedTools] = useState([])
   const [thinkingMode, setThinkingMode] = useState(false)
   const [isStreaming, setIsStreaming] = useState(true)
@@ -26,29 +36,23 @@ const useChat = () => {
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  // 附件状态
   const [attachments, setAttachments] = useState([])
   const [attachmentsOpen, setAttachmentsOpen] = useState(false)
 
-  // 消息状态
   const [messages, setMessages] = useState([])
 
-  // 会话状态
   const [sessions, setSessions] = useState([])
   const [activeKey, setActiveKey] = useState(null)
   const [isTempSession, setIsTempSession] = useState(false)
   const [editingSession, setEditingSession] = useState(null)
   const [editTitle, setEditTitle] = useState('')
 
-  // ==================== 会话管理 ====================
-
-  // 加载会话列表
   const loadSessions = useCallback(async () => {
     try {
       const response = await api.get(API_ENDPOINTS.SESSIONS)
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         const sessionItems = (response.data.data?.[0]?.sessions || [])
-          .map(s => ({
+          .map((s) => ({
             id: String(s.sessionId),
             title: s.title || `会话 ${s.sessionId}`,
             createdAt: s.createdAt
@@ -61,21 +65,20 @@ const useChat = () => {
     }
   }, [])
 
-  // 初始化加载
   useEffect(() => {
     loadSessions()
   }, [loadSessions])
 
-  // 加载消息历史
   const loadMessages = useCallback(async (sessionId) => {
     try {
       const response = await api.get(API_ENDPOINTS.AGENT_MESSAGES(sessionId))
       if (response.data?.code === STATUS_CODES.SUCCESS && Array.isArray(response.data.data?.[0]?.messages)) {
-        const historyMessages = response.data.data[0].messages.map(item => ({
-          key: String(item.index || generateMessageId()),
-          role: item.role === 'user' ? MESSAGE_ROLES.USER : MESSAGE_ROLES.AI,
-          content: item.content,
-          reasoningContent: ''
+        const historyMessages = response.data.data[0].messages.map((item) => createRecord({
+          key: `msg_${item.index}_${item.message?.role || 'unknown'}`,
+          index: item.index,
+          message: item.message || {},
+          pending: false,
+          createdAt: item.created_at
         }))
         setMessages(historyMessages)
       } else {
@@ -87,17 +90,15 @@ const useChat = () => {
     }
   }, [])
 
-  // 创建新会话
   const createSession = useCallback(() => {
-    setSessions(prev => prev.filter(s => s.id !== SPECIAL_SESSIONS.TEMP))
-    setSessions(prev => [{ id: SPECIAL_SESSIONS.TEMP, title: '新会话', timestamp: Date.now() }, ...prev])
+    setSessions((prev) => prev.filter((s) => s.id !== SPECIAL_SESSIONS.TEMP))
+    setSessions((prev) => [{ id: SPECIAL_SESSIONS.TEMP, title: '新会话', timestamp: Date.now() }, ...prev])
     setActiveKey(SPECIAL_SESSIONS.TEMP)
     setIsTempSession(true)
     setMessages([])
     setCurrentPage(1)
   }, [])
 
-  // 切换会话
   const switchSession = useCallback(async (sessionId) => {
     if (!sessionId) return
     setActiveKey(sessionId)
@@ -110,13 +111,12 @@ const useChat = () => {
     }
   }, [loadMessages])
 
-  // 删除会话
   const deleteSession = useCallback(async (sessionId) => {
     try {
       const response = await api.delete(API_ENDPOINTS.SESSION_DELETE(sessionId))
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         message.success('会话已删除')
-        setSessions(prev => prev.filter(s => s.id !== sessionId))
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId))
         if (activeKey === sessionId) {
           setActiveKey(null)
           setIsTempSession(false)
@@ -131,13 +131,12 @@ const useChat = () => {
     }
   }, [activeKey, message])
 
-  // 更新会话标题
   const updateSessionTitle = useCallback(async (sessionId, title) => {
     try {
       const response = await api.put(API_ENDPOINTS.SESSION_TITLE(sessionId), { title })
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         message.success('标题已更新')
-        setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title } : s))
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)))
       } else {
         message.error(response.data?.msg || '更新失败')
       }
@@ -147,7 +146,6 @@ const useChat = () => {
     }
   }, [message])
 
-  // 分享会话
   const shareSession = useCallback(async (sessionId) => {
     try {
       const shareUrl = `${window.location.origin}/shared-chat/${sessionId}`
@@ -159,7 +157,6 @@ const useChat = () => {
     }
   }, [message])
 
-  // 确认重命名
   const confirmRename = useCallback(async () => {
     if (!editingSession || !editTitle.trim()) {
       setEditingSession(null)
@@ -170,14 +167,13 @@ const useChat = () => {
     setEditTitle('')
   }, [editingSession, editTitle, updateSessionTitle])
 
-  // 菜单点击处理
   const handleMenuClick = useCallback((itemInfo, sessionId) => {
     itemInfo.domEvent.stopPropagation()
     const { key } = itemInfo
 
     switch (key) {
       case 'rename': {
-        const session = sessions.find(s => s.id === sessionId)
+        const session = sessions.find((s) => s.id === sessionId)
         if (session) {
           setEditingSession(sessionId)
           setEditTitle(session.title || '')
@@ -193,35 +189,20 @@ const useChat = () => {
     }
   }, [sessions, shareSession, deleteSession])
 
-  // 处理会话创建回调
   const handleSessionCreated = useCallback((sessionId) => {
     const newSid = String(sessionId)
     if (isTempSession) {
-      setSessions(prev => prev.map(s =>
+      setSessions((prev) => prev.map((s) => (
         s.id === SPECIAL_SESSIONS.TEMP ? { id: newSid, title: '新会话', timestamp: Date.now() } : s
-      ))
+      )))
       setActiveKey(newSid)
       setIsTempSession(false)
+    } else if (!sessions.some((s) => s.id === newSid)) {
+      loadSessions()
     }
-  }, [isTempSession])
+  }, [isTempSession, sessions, loadSessions])
 
-  // ==================== 消息发送 ====================
-
-  // 流式发送消息
   const sendStreamMessage = useCallback(async (question, regenerateFrom = null) => {
-    const aiMessageId = generateMessageId()
-    setMessages(prev => [...prev, {
-      key: aiMessageId,
-      role: MESSAGE_ROLES.AI,
-      content: '',
-      reasoningContent: '',
-      reasoningCompleted: !thinkingMode,
-      answerUnlocked: true,
-      thinkingMode,
-      loading: true,
-      streaming: true
-    }])
-
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT}`
     const body = {
       message: question,
@@ -229,30 +210,58 @@ const useChat = () => {
       thinking_mode: thinkingMode,
       stream: true
     }
-    
+
     if (activeKey && !isTempSession) {
       body.session_id = activeKey
     }
-    
     if (regenerateFrom !== null) {
       body.regenerate_from = regenerateFrom
     }
 
-    let fullContent = ''
-    let fullReasoning = ''
-    let isFinalized = false
+    let nextMessageIndex = null
+    let activeMessageKey = null
+    const createdRecordKeys = []
 
-    const updateMessage = (patch) => {
-      setMessages(prev => prev.map(m =>
-        m.key === aiMessageId ? { ...m, ...patch } : m
-      ))
+    const finalizeStream = () => {
+      if (createdRecordKeys.length > 0) {
+        setMessages((prev) => prev.map((item) => (
+          createdRecordKeys.includes(item.key) ? { ...item, pending: false } : item
+        )))
+      }
+      activeMessageKey = null
+      setIsLoading(false)
     }
 
-    const finalizeMessage = () => {
-      if (isFinalized) return
-      isFinalized = true
-      updateMessage({ loading: false, streaming: false })
-      setIsLoading(false)
+    const appendStreamRecord = (chunk) => {
+      const record = createRecord({
+        index: nextMessageIndex,
+        message: mergeSchemaMessageChunk({}, chunk),
+        pending: !isMessageFinished(chunk)
+      })
+      if (nextMessageIndex !== null) {
+        nextMessageIndex += 1
+      }
+      activeMessageKey = isMessageFinished(record.message) ? null : record.key
+      createdRecordKeys.push(record.key)
+      setMessages((prev) => [...prev, record])
+    }
+
+    const updateStreamRecord = (chunk) => {
+      setMessages((prev) => prev.map((item) => {
+        if (item.key !== activeMessageKey) {
+          return item
+        }
+        const mergedMessage = mergeSchemaMessageChunk(item.message, chunk)
+        const pending = !isMessageFinished(mergedMessage)
+        if (!pending) {
+          activeMessageKey = null
+        }
+        return {
+          ...item,
+          message: mergedMessage,
+          pending
+        }
+      }))
     }
 
     try {
@@ -277,8 +286,7 @@ const useChat = () => {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value, { stream: true })
-        buffer += chunk
+        buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
@@ -286,118 +294,64 @@ const useChat = () => {
           const parsed = parseSSELine(line)
           if (!parsed) continue
 
-          if (parsed.type === 'json' && parsed.data.type) {
-            const event = parsed.data
-            
-            switch (event.type) {
-              case SSE_EVENT_TYPES.META:
-                if (event.session_id) {
-                  handleSessionCreated(String(event.session_id))
-                }
-                break
-                
-              case SSE_EVENT_TYPES.TOOL_CALL:
-                console.log('[SSE] Tool call:', event)
-                break
-
-              case SSE_EVENT_TYPES.REASONING_DELTA:
-                if (event.content) {
-                  fullReasoning += event.content
-                  updateMessage({
-                    answerUnlocked: false,
-                    reasoningContent: fullReasoning,
-                    reasoningCompleted: false,
-                    loading: false,
-                    streaming: true
-                  })
-                }
-                break
-
-              case SSE_EVENT_TYPES.REASONING_END:
-                updateMessage({
-                  reasoningCompleted: true,
-                  loading: false,
-                  streaming: true
-                })
-                break
-                
-              case SSE_EVENT_TYPES.CONTENT_DELTA:
-                if (event.content) {
-                  fullContent += event.content
-                  updateMessage({ content: fullContent, loading: false, streaming: true })
-                }
-                break
-                
-              case SSE_EVENT_TYPES.MESSAGE_END:
-                finalizeMessage()
-                break
-                
-              case SSE_EVENT_TYPES.ERROR:
-                setMessages(prev => prev.map(m =>
-                  m.key === aiMessageId ? { 
-                    ...m, 
-                    loading: false, 
-                    streaming: false, 
-                    content: fullContent + '\n\n[错误: ' + (event.message || '未知错误') + ']' 
-                  } : m
-                ))
-                setIsLoading(false)
-                return
-                
-              default:
-                break
-            }
-          } else if (parsed.type === 'done') {
-            finalizeMessage()
-          } else if (parsed.type === 'json' && parsed.data.sessionId) {
-            handleSessionCreated(String(parsed.data.sessionId))
-          } else if (parsed.type === 'text') {
-            fullContent += parsed.data
-            updateMessage({ content: fullContent, loading: false, streaming: true })
+          if (parsed.type === 'done') {
+            finalizeStream()
+            continue
           }
+
+          if (parsed.type !== 'json') {
+            continue
+          }
+
+          const payload = parsed.data
+          if (payload?.type === SSE_EVENT_TYPES.META) {
+            if (payload.session_id) {
+              handleSessionCreated(String(payload.session_id))
+            }
+            if (typeof payload.message_index === 'number') {
+              nextMessageIndex = payload.message_index
+            }
+            continue
+          }
+
+          if (payload?.type === SSE_EVENT_TYPES.ERROR) {
+            finalizeStream()
+            message.error(payload.message || '流式传输出错')
+            return
+          }
+
+          if (!isSchemaMessagePayload(payload)) {
+            continue
+          }
+
+          if (!activeMessageKey) {
+            appendStreamRecord(payload)
+            continue
+          }
+
+          updateStreamRecord(payload)
         }
       }
 
-      if (!isFinalized) {
-        finalizeMessage()
-      }
+      finalizeStream()
     } catch (err) {
       console.error('Stream error:', err)
-      if (!isFinalized) {
-        setMessages(prev => prev.map(m =>
-          m.key === aiMessageId ? { ...m, loading: false, streaming: false, content: '流式传输出错: ' + err.message } : m
-        ))
-        setIsLoading(false)
-      }
+      finalizeStream()
       message.error('流式传输出错: ' + err.message)
     }
   }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, message])
 
-  // 非流式发送消息
   const sendNormalMessage = useCallback(async (question, regenerateFrom = null) => {
-    const aiMessageId = generateMessageId()
-    setMessages(prev => [...prev, {
-      key: aiMessageId,
-      role: MESSAGE_ROLES.AI,
-      content: '',
-      reasoningContent: '',
-      reasoningCompleted: !thinkingMode,
-      answerUnlocked: true,
-      thinkingMode,
-      loading: true
-    }])
-
     const payload = {
       message: question,
       tools: selectedTools,
       thinking_mode: thinkingMode,
       stream: false
     }
-    
+
     if (activeKey && !isTempSession) {
       payload.session_id = activeKey
     }
-    
     if (regenerateFrom !== null) {
       payload.regenerate_from = regenerateFrom
     }
@@ -407,41 +361,23 @@ const useChat = () => {
 
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         const data = response.data.data?.[0] || {}
-        const aiContent = data.content || ''
-        const reasoningContent = data.reasoning_content || ''
-        setMessages(prev => prev.map(m =>
-          m.key === aiMessageId ? {
-            ...m,
-            content: aiContent,
-            reasoningContent,
-            reasoningCompleted: true,
-            answerUnlocked: true,
-            loading: false,
-            streaming: false
-          } : m
-        ))
-
         if (data.session_id) {
-          handleSessionCreated(data.session_id)
+          handleSessionCreated(String(data.session_id))
+          await loadMessages(String(data.session_id))
+        } else if (activeKey && !isTempSession) {
+          await loadMessages(activeKey)
         }
       } else {
         message.error(response.data?.msg || '发送失败')
-        setMessages(prev => prev.map(m =>
-          m.key === aiMessageId ? { ...m, loading: false, content: '发送失败' } : m
-        ))
       }
     } catch (err) {
       console.error('Send message error:', err)
       message.error('发送失败，请重试')
-      setMessages(prev => prev.map(m =>
-        m.key === aiMessageId ? { ...m, loading: false, content: '发送失败' } : m
-      ))
+    } finally {
+      setIsLoading(false)
     }
+  }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, loadMessages, message])
 
-    setIsLoading(false)
-  }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, message])
-
-  // 附件上传处理
   const handleAttachmentUpload = useCallback(async (file) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -452,10 +388,9 @@ const useChat = () => {
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         message.success(`${file.name} 上传成功`)
         return response.data.data?.[0]?.id || null
-      } else {
-        message.error(response.data?.msg || '上传失败')
-        return null
       }
+      message.error(response.data?.msg || '上传失败')
+      return null
     } catch (error) {
       console.error('Attachment upload error:', error)
       message.error(`${file.name} 上传失败`)
@@ -463,7 +398,6 @@ const useChat = () => {
     }
   }, [message])
 
-  // 处理发送
   const handleSend = useCallback(async (content, options = {}) => {
     if (!content.trim() && attachments.length === 0) {
       message.warning('请输入消息内容或添加附件')
@@ -472,45 +406,39 @@ const useChat = () => {
 
     setIsLoading(true)
 
-    // 上传附件
     let uploadedFileIds = []
     if (attachments.length > 0) {
       const uploadPromises = attachments
-        .filter(item => item.originFileObj)
-        .map(item => handleAttachmentUpload(item.originFileObj))
+        .filter((item) => item.originFileObj)
+        .map((item) => handleAttachmentUpload(item.originFileObj))
       const results = await Promise.all(uploadPromises)
-      uploadedFileIds = results.filter(id => id !== null)
+      uploadedFileIds = results.filter((id) => id !== null)
     }
 
-    // 构建消息内容
     let messageContent = content
     if (uploadedFileIds.length > 0) {
-      const fileNames = attachments.map(item => item.name).join(', ')
+      const fileNames = attachments.map((item) => item.name).join(', ')
       messageContent = content ? `${content}\n\n[附件: ${fileNames}]` : `[附件: ${fileNames}]`
     }
 
-    // 添加用户消息
     if (options.regenerateFrom === undefined) {
-      const userMessage = {
-        key: generateMessageId(),
-        role: MESSAGE_ROLES.USER,
-        content: messageContent
-      }
+      const userRecord = createRecord({
+        message: { role: MESSAGE_ROLES.USER, content: messageContent }
+      })
 
       if (options.replaceIndex !== undefined) {
-        setMessages(prev => {
-          const newMessages = prev.slice(0, options.replaceIndex)
-          newMessages.push(userMessage)
-          return newMessages
+        setMessages((prev) => {
+          const next = prev.slice(0, options.replaceIndex)
+          next.push(userRecord)
+          return next
         })
       } else {
-        setMessages(prev => [...prev, userMessage])
+        setMessages((prev) => [...prev, userRecord])
       }
     }
 
     setInputValue('')
-    // 清理附件
-    attachments.forEach(item => {
+    attachments.forEach((item) => {
       if (item.url?.startsWith('blob:')) {
         URL.revokeObjectURL(item.url)
       }
@@ -518,37 +446,29 @@ const useChat = () => {
     setAttachments([])
     setAttachmentsOpen(false)
 
-    // 跳转到最后一页
-    setCurrentPage(prevPage => {
-      const newTotalPages = options.replaceIndex !== undefined
-        ? Math.ceil((options.replaceIndex + 1) / MESSAGE_PAGE_SIZE)
-        : Math.ceil((messages.length + 1) / MESSAGE_PAGE_SIZE)
-      return prevPage !== newTotalPages ? newTotalPages : prevPage
+    setCurrentPage((prevPage) => {
+      const total = options.replaceIndex !== undefined ? options.replaceIndex + 1 : messages.length + 1
+      const page = Math.ceil(total / MESSAGE_PAGE_SIZE)
+      return prevPage !== page ? page : prevPage
     })
 
-    try {
-      if (isStreaming) {
-        await sendStreamMessage(messageContent, options.regenerateFrom)
-      } else {
-        await sendNormalMessage(messageContent, options.regenerateFrom)
-      }
-      bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
-    } catch (err) {
-      console.error('Send message error:', err)
-      message.error('发送失败，请重试')
+    if (isStreaming) {
+      await sendStreamMessage(messageContent, options.regenerateFrom)
+    } else {
+      await sendNormalMessage(messageContent, options.regenerateFrom)
     }
-  }, [messages.length, isStreaming, sendStreamMessage, sendNormalMessage, message, attachments, handleAttachmentUpload])
 
-  // 重试
-  const handleRetry = useCallback((msg) => {
-    if (msg.role !== MESSAGE_ROLES.USER) return
-    const index = messages.findIndex(m => m.key === msg.key)
+    bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
+  }, [attachments, handleAttachmentUpload, isStreaming, message, messages.length, sendNormalMessage, sendStreamMessage])
+
+  const handleRetry = useCallback((record) => {
+    if (record.message?.role !== MESSAGE_ROLES.USER) return
+    const index = messages.findIndex((item) => item.key === record.key)
     if (index === -1) return
-    handleSend(msg.content, { replaceIndex: index })
+    handleSend(record.message.content || '', { replaceIndex: index })
     setCurrentPage(Math.ceil(messages.length / MESSAGE_PAGE_SIZE))
   }, [messages, handleSend])
 
-  // TTS 播放
   const playTTS = useCallback(async (text) => {
     try {
       const response = await api.post(API_ENDPOINTS.TTS, { text })
@@ -569,8 +489,8 @@ const useChat = () => {
               return
             }
           }
-          attempts++
-          await new Promise(resolve => setTimeout(resolve, 2000))
+          attempts += 1
+          await new Promise((resolve) => setTimeout(resolve, 2000))
         }
         message.error('语音合成超时')
       } else {
@@ -582,37 +502,25 @@ const useChat = () => {
     }
   }, [message])
 
-  // 操作按钮点击
-  const handleActionClick = useCallback((item, { key }) => {
+  const handleActionClick = useCallback((record, { key }) => {
     switch (key) {
       case 'copy':
-        navigator.clipboard.writeText(item.content)
+        navigator.clipboard.writeText(record.message?.content || '')
         break
       case 'tts':
-        playTTS(item.content)
+        playTTS(record.message?.content || '')
         break
       case 'retry':
-        handleRetry(item)
+        handleRetry(record)
+        break
+      default:
         break
     }
   }, [playTTS, handleRetry])
 
-  const handleReasoningDisplayComplete = useCallback((messageKey) => {
-    setMessages(prev => prev.map(item => {
-      if (item.key !== messageKey || item.answerUnlocked) {
-        return item
-      }
-      return {
-        ...item,
-        answerUnlocked: true,
-      }
-    }))
-  }, [])
-
-  // 清理 blob URL
   useEffect(() => {
     return () => {
-      attachments.forEach(item => {
+      attachments.forEach((item) => {
         if (item.url?.startsWith('blob:')) {
           URL.revokeObjectURL(item.url)
         }
@@ -621,9 +529,7 @@ const useChat = () => {
   }, [attachments])
 
   return {
-    // refs
     bubbleListRef,
-    // 基础状态
     selectedTools,
     thinkingMode,
     isStreaming,
@@ -638,17 +544,13 @@ const useChat = () => {
     isTempSession,
     editingSession,
     editTitle,
-    // 会话操作
     createSession,
     switchSession,
     handleMenuClick,
     confirmRename,
     setEditTitle,
-    // 消息操作
     handleSend,
     handleActionClick,
-    handleReasoningDisplayComplete,
-    // 状态更新
     setSelectedTools,
     setThinkingMode,
     setIsStreaming,

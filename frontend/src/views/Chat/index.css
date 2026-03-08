@@ -105,6 +105,47 @@
   margin-left: 40px;
 }
 
+.assistant-process-card {
+  max-width: 70%;
+  margin-left: 40px;
+  background: rgba(255, 250, 240, 0.92);
+  border: 1px solid rgba(250, 173, 20, 0.18);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.assistant-process-card .ant-collapse-header {
+  font-weight: 600;
+  color: #8a5a00;
+}
+
+.process-item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.process-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.process-tool-call pre {
+  margin: 8px 0 0;
+  padding: 12px;
+  background: rgba(77, 56, 0, 0.06);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.process-tool-result {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
 /* 分页容器 */
 .pagination-container {
   text-align: center;
@@ -232,4 +273,22 @@
   background: #ccc;
   box-shadow: none;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .message-list-container {
+    padding: 18px 14px;
+  }
+
+  .assistant-thinking,
+  .assistant-process-card,
+  .message-list .ant-bubble {
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .chat-toolbar,
+  .input-container {
+    padding: 16px;
+  }
 }

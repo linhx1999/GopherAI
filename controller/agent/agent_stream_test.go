@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/gin-gonic/gin"
 
 	"GopherAI/common/code"
@@ -35,10 +36,12 @@ func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
 
-	streamSSE(c, oneShotSSEStream(agentService.SSEEvent{
-		Type:         agentService.SSEEventTypeMeta,
-		SessionID:    "sess_1",
-		MessageIndex: 1,
+	streamSSE(c, oneShotSSEStream(agentService.StreamEvent{
+		Meta: &agentService.StreamMeta{
+			Type:         agentService.StreamPayloadTypeMeta,
+			SessionID:    "sess_1",
+			MessageIndex: 1,
+		},
 	}))
 
 	body := recorder.Body.String()
@@ -56,6 +59,30 @@ func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	}
 }
 
+func TestStreamLoopWritesSchemaMessagePayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := newCloseNotifyRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
+
+	streamSSE(c, oneShotSSEStream(agentService.StreamEvent{
+		Message: &schema.Message{
+			Role:             schema.Assistant,
+			Content:          "答案",
+			ReasoningContent: "先想",
+		},
+	}))
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"role":"assistant"`) {
+		t.Fatalf("expected assistant payload, got %q", body)
+	}
+	if !strings.Contains(body, `"reasoning_content":"先想"`) {
+		t.Fatalf("expected reasoning content, got %q", body)
+	}
+}
+
 func TestHandleStreamRequestReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -68,11 +95,14 @@ func TestHandleStreamRequestReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	if !ok {
 		t.Fatal("expected error event")
 	}
-	if event.Type != agentService.SSEEventTypeError {
-		t.Fatalf("expected error type, got %q", event.Type)
+	if event.Error == nil {
+		t.Fatal("expected error payload")
 	}
-	if event.Message != "message is required" {
-		t.Fatalf("expected message validation error, got %q", event.Message)
+	if event.Error.Type != agentService.StreamPayloadTypeError {
+		t.Fatalf("expected error type, got %q", event.Error.Type)
+	}
+	if event.Error.Message != "message is required" {
+		t.Fatalf("expected message validation error, got %q", event.Error.Message)
 	}
 	if _, ok := <-events; ok {
 		t.Fatal("expected channel to close after single error event")
@@ -96,11 +126,14 @@ func TestHandleStreamRequestReturnsErrorEventWhenRegenerateSessionMissing(t *tes
 	if !ok {
 		t.Fatal("expected error event")
 	}
-	if event.Type != agentService.SSEEventTypeError {
-		t.Fatalf("expected error type, got %q", event.Type)
+	if event.Error == nil {
+		t.Fatal("expected error payload")
 	}
-	if event.Message != "session_id is required for regenerate" {
-		t.Fatalf("expected regenerate validation error, got %q", event.Message)
+	if event.Error.Type != agentService.StreamPayloadTypeError {
+		t.Fatalf("expected error type, got %q", event.Error.Type)
+	}
+	if event.Error.Message != "session_id is required for regenerate" {
+		t.Fatalf("expected regenerate validation error, got %q", event.Error.Message)
 	}
 	if _, ok := <-events; ok {
 		t.Fatal("expected channel to close after single error event")

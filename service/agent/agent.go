@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"time"
 
@@ -29,51 +28,55 @@ const SystemPrompt = `你是一个智能助手，可以帮助用户解答各种�
 
 请用中文回答，保持回答简洁、准确、友好。`
 
-// SSE 事件类型
 const (
-	SSEEventTypeMeta         = "meta"
-	SSEEventTypeToolCall     = "tool_call"
-	SSEEventTypeReasoning    = "reasoning_delta"
-	SSEEventTypeReasoningEnd = "reasoning_end"
-	SSEEventTypeContentDelta = "content_delta"
-	SSEEventTypeMessageEnd   = "message_end"
-	SSEEventTypeError        = "error"
+	StreamPayloadTypeMeta  = "meta"
+	StreamPayloadTypeError = "error"
 )
 
-// SSEEvent 统一的 SSE 载荷结构。
-type SSEEvent struct {
-	Type         string          `json:"type"`
-	SessionID    string          `json:"session_id,omitempty"`
-	MessageIndex int             `json:"message_index,omitempty"`
-	ToolID       string          `json:"tool_id,omitempty"`
-	Function     string          `json:"function,omitempty"`
-	Arguments    json.RawMessage `json:"arguments,omitempty"`
-	Content      string          `json:"content,omitempty"`
-	Status       string          `json:"status,omitempty"`
-	Message      string          `json:"message,omitempty"`
+type StreamMeta struct {
+	Type         string `json:"type"`
+	SessionID    string `json:"session_id"`
+	MessageIndex int    `json:"message_index"`
+}
+
+type StreamError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// StreamEvent 表示 controller 可直接写入 SSE 的载荷。
+type StreamEvent struct {
+	Meta    *StreamMeta
+	Message *schema.Message
+	Error   *StreamError
 }
 
 // StreamHandle 表示一个可被 controller 消费的事件流。
 type StreamHandle struct {
 	SessionID string
-	Events    <-chan SSEEvent
+	Events    <-chan StreamEvent
 }
 
 // AgentResult Agent 执行结果
 type AgentResult struct {
-	SessionID        string           `json:"session_id"`
-	MessageIndex     int              `json:"message_index"`
-	Role             string           `json:"role"`
-	Content          string           `json:"content"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
-	ToolCalls        []model.ToolCall `json:"tool_calls,omitempty"`
+	SessionID    string          `json:"session_id"`
+	MessageIndex int             `json:"message_index"`
+	Message      *schema.Message `json:"message"`
 }
 
-// NewErrorEvent 创建错误事件。
-func NewErrorEvent(message string) SSEEvent {
-	return SSEEvent{
-		Type:    SSEEventTypeError,
-		Message: message,
+// HistoryMessageItem 历史消息项
+type HistoryMessageItem struct {
+	Index     int             `json:"index"`
+	Message   *schema.Message `json:"message"`
+	CreatedAt string          `json:"created_at"`
+}
+
+func NewErrorEvent(message string) StreamEvent {
+	return StreamEvent{
+		Error: &StreamError{
+			Type:    StreamPayloadTypeError,
+			Message: message,
+		},
 	}
 }
 
@@ -89,88 +92,73 @@ func publishMessageToDB(msg *model.Message) {
 	}
 }
 
-// appendMessageToRedis 追加消息到 Redis 缓存
 func appendMessageToRedis(msg *model.Message) error {
 	return redis_cache.AppendMessage(msg.SessionID, msg)
 }
 
-func buildUserMessage(sessionID string, userName string, index int, content string) *model.Message {
-	return &model.Message{
-		SessionID: sessionID,
-		UserName:  userName,
-		Index:     index,
-		Role:      "user",
-		Content:   content,
-		CreatedAt: time.Now(),
+func persistMessage(msg *model.Message) {
+	if msg == nil {
+		return
 	}
+	if err := appendMessageToRedis(msg); err != nil {
+		log.Printf("appendMessageToRedis failed: %v", err)
+	}
+	publishMessageToDB(msg)
 }
 
-func buildAssistantMessage(sessionID string, userName string, index int, result *agentcommon.StreamResult) *model.Message {
-	msg := &model.Message{
+func buildStoredMessage(sessionID string, userName string, index int, msg *schema.Message) *model.Message {
+	stored := &model.Message{
 		SessionID: sessionID,
 		UserName:  userName,
 		Index:     index,
-		Role:      "assistant",
-		Content:   result.Content,
 		CreatedAt: time.Now(),
 	}
-	if len(result.ToolCalls) > 0 {
-		if err := msg.SetToolCalls(result.ToolCalls); err != nil {
-			log.Printf("buildAssistantMessage set tool calls failed: %v", err)
+	if err := stored.SetSchemaMessage(msg); err != nil {
+		log.Printf("SetSchemaMessage failed: %v", err)
+	}
+	return stored
+}
+
+func persistProducedMessages(sessionID string, userName string, startIndex int, produced []*schema.Message) int {
+	lastIndex := startIndex - 1
+	for i, msg := range produced {
+		index := startIndex + i
+		persistMessage(buildStoredMessage(sessionID, userName, index, msg))
+		lastIndex = index
+	}
+	return lastIndex
+}
+
+func buildMessages(history []*model.Message, userMessage *schema.Message) []*schema.Message {
+	messages := make([]*schema.Message, 0, len(history)+2)
+	messages = append(messages, &schema.Message{
+		Role:    schema.System,
+		Content: SystemPrompt,
+	})
+
+	for _, m := range history {
+		if m == nil {
+			continue
+		}
+		msg := m.GetSchemaMessage()
+		if msg != nil {
+			messages = append(messages, msg)
 		}
 	}
-	return msg
-}
 
-func buildAgentResult(sessionID string, messageIndex int, result *agentcommon.StreamResult) *AgentResult {
-	return &AgentResult{
-		SessionID:        sessionID,
-		MessageIndex:     messageIndex,
-		Role:             "assistant",
-		Content:          result.Content,
-		ReasoningContent: result.ReasoningContent,
-		ToolCalls:        result.ToolCalls,
+	if userMessage != nil {
+		messages = append(messages, userMessage)
 	}
+
+	return messages
 }
 
-func emitEvent(ctx context.Context, events chan<- SSEEvent, event SSEEvent) error {
+func emitEvent(ctx context.Context, events chan<- StreamEvent, event StreamEvent) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case events <- event:
 		return nil
-	}
-}
-
-func translateStreamEvent(event agentcommon.StreamEvent) SSEEvent {
-	switch event.Type {
-	case agentcommon.StreamEventTypeToolCall:
-		if event.ToolCall == nil {
-			return SSEEvent{}
-		}
-		return SSEEvent{
-			Type:      SSEEventTypeToolCall,
-			ToolID:    event.ToolCall.ToolID,
-			Function:  event.ToolCall.Function,
-			Arguments: event.ToolCall.Arguments,
-		}
-	case agentcommon.StreamEventTypeReasoningDelta:
-		return SSEEvent{
-			Type:    SSEEventTypeReasoning,
-			Content: event.Content,
-		}
-	case agentcommon.StreamEventTypeReasoningEnd:
-		return SSEEvent{
-			Type:   SSEEventTypeReasoningEnd,
-			Status: "completed",
-		}
-	case agentcommon.StreamEventTypeContentDelta:
-		return SSEEvent{
-			Type:    SSEEventTypeContentDelta,
-			Content: event.Content,
-		}
-	default:
-		return SSEEvent{}
 	}
 }
 
@@ -205,35 +193,6 @@ func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 	return result, nil
 }
 
-// buildMessages 构建发送给 Agent 的消息列表
-func buildMessages(history []*model.Message, userContent string) []*schema.Message {
-	messages := make([]*schema.Message, 0, len(history)+2)
-	messages = append(messages, &schema.Message{
-		Role:    schema.System,
-		Content: SystemPrompt,
-	})
-
-	for _, m := range history {
-		role := schema.Assistant
-		if m.Role == "user" {
-			role = schema.User
-		}
-		messages = append(messages, &schema.Message{
-			Role:    role,
-			Content: m.Content,
-		})
-	}
-
-	if userContent != "" {
-		messages = append(messages, &schema.Message{
-			Role:    schema.User,
-			Content: userContent,
-		})
-	}
-
-	return messages
-}
-
 // CreateSessionOnly 仅创建会话（用于流式响应）
 func CreateSessionOnly(userName string, title string) (string, code.Code) {
 	newSession := &model.Session{
@@ -264,26 +223,42 @@ func GenerateWithContext(ctx context.Context, userName string, sessionID string,
 		return nil, code.CodeServerBusy
 	}
 
+	userMessage := schema.UserMessage(userContent)
 	nextIndex := len(history)
+	persistMessage(buildStoredMessage(sessionID, userName, nextIndex, userMessage))
 
-	userMsg := buildUserMessage(sessionID, userName, nextIndex, userContent)
-	_ = appendMessageToRedis(userMsg)
-	publishMessageToDB(userMsg)
+	input := buildMessages(history, userMessage)
+	agentRunner, err := agentMgr.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
+	if err != nil {
+		log.Println("Generate GetOrCreateAgentWithTools error:", err)
+		return nil, code.AIModelFail
+	}
 
-	messages := buildMessages(history, userContent)
-
-	aiResponse, err := agentMgr.GenerateWithTools(ctx, sessionID, userName, messages, toolNames, thinkingMode)
+	produced, finalMessage, err := agentcommon.GenerateProducedMessages(ctx, agentRunner, input)
 	if err != nil {
 		log.Println("Generate error:", err)
 		return nil, code.AIModelFail
 	}
+	if len(produced) == 0 && finalMessage != nil {
+		produced = append(produced, finalMessage)
+	}
 
-	result := agentcommon.ResultFromMessage(aiResponse)
-	aiMsg := buildAssistantMessage(sessionID, userName, nextIndex+1, result)
-	_ = appendMessageToRedis(aiMsg)
-	publishMessageToDB(aiMsg)
+	lastIndex := persistProducedMessages(sessionID, userName, nextIndex+1, produced)
+	if finalMessage == nil && len(produced) > 0 {
+		finalMessage = produced[len(produced)-1]
+	}
+	if finalMessage == nil {
+		finalMessage = &schema.Message{Role: schema.Assistant}
+	}
+	if lastIndex < nextIndex+1 {
+		lastIndex = nextIndex
+	}
 
-	return buildAgentResult(sessionID, aiMsg.Index, result), code.CodeSuccess
+	return &AgentResult{
+		SessionID:    sessionID,
+		MessageIndex: lastIndex,
+		Message:      finalMessage,
+	}, code.CodeSuccess
 }
 
 // OpenStreamWithMeta 打开一个可供 controller 消费的 SSE 事件流。
@@ -296,10 +271,10 @@ func OpenStreamWithMeta(ctx context.Context, userName string, sessionID string, 
 		}
 	}
 
-	return openStreamWithSession(ctx, userName, sessionID, userContent, toolNames, thinkingMode)
+	return openStreamWithSession(ctx, userName, sessionID, userContent, toolNames, thinkingMode, true)
 }
 
-func openStreamWithSession(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+func openStreamWithSession(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool, persistUser bool) (*StreamHandle, code.Code) {
 	agentMgr := agentcommon.GetAgentManager()
 
 	history, err := getMessagesFromRedis(sessionID)
@@ -308,61 +283,48 @@ func openStreamWithSession(ctx context.Context, userName string, sessionID strin
 		return nil, code.CodeServerBusy
 	}
 
-	nextIndex := len(history)
-	aiIndex := nextIndex + 1
+	var userMessage *schema.Message
+	startIndex := len(history)
+	if persistUser {
+		userMessage = schema.UserMessage(userContent)
+		persistMessage(buildStoredMessage(sessionID, userName, startIndex, userMessage))
+		startIndex++
+	}
 
-	userMsg := buildUserMessage(sessionID, userName, nextIndex, userContent)
-	_ = appendMessageToRedis(userMsg)
-	publishMessageToDB(userMsg)
-
-	messages := buildMessages(history, userContent)
-	msgReader, err := agentMgr.OpenStreamWithTools(ctx, sessionID, userName, messages, toolNames, thinkingMode)
+	input := buildMessages(history, userMessage)
+	agentRunner, err := agentMgr.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
 	if err != nil {
-		log.Println("OpenStream OpenStreamWithTools error:", err)
+		log.Println("OpenStream GetOrCreateAgentWithTools error:", err)
 		return nil, code.AIModelFail
 	}
 
-	events := make(chan SSEEvent)
+	events := make(chan StreamEvent)
 	go func() {
 		defer close(events)
 
-		if err := emitEvent(ctx, events, SSEEvent{
-			Type:         SSEEventTypeMeta,
-			SessionID:    sessionID,
-			MessageIndex: aiIndex,
+		if err := emitEvent(ctx, events, StreamEvent{
+			Meta: &StreamMeta{
+				Type:         StreamPayloadTypeMeta,
+				SessionID:    sessionID,
+				MessageIndex: startIndex,
+			},
 		}); err != nil {
 			return
 		}
 
-		result, err := agentcommon.ConsumeStream(msgReader, thinkingMode, func(event agentcommon.StreamEvent) error {
-			sseEvent := translateStreamEvent(event)
-			if sseEvent.Type == "" {
-				return nil
-			}
-			return emitEvent(ctx, events, sseEvent)
+		produced, err := agentcommon.StreamProducedMessages(ctx, agentRunner, input, func(msg *schema.Message) error {
+			return emitEvent(ctx, events, StreamEvent{Message: msg})
 		})
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Println("OpenStream consume error:", err)
-			_ = emitEvent(ctx, events, SSEEvent{
-				Type:   SSEEventTypeMessageEnd,
-				Status: "error",
-			})
+			log.Println("OpenStream StreamProducedMessages error:", err)
+			_ = emitEvent(ctx, events, NewErrorEvent("agent stream failed"))
 			return
 		}
 
-		if err := emitEvent(ctx, events, SSEEvent{
-			Type:   SSEEventTypeMessageEnd,
-			Status: "completed",
-		}); err != nil {
-			return
-		}
-
-		aiMsg := buildAssistantMessage(sessionID, userName, aiIndex, result)
-		_ = appendMessageToRedis(aiMsg)
-		publishMessageToDB(aiMsg)
+		persistProducedMessages(sessionID, userName, startIndex, produced)
 	}()
 
 	return &StreamHandle{
@@ -377,20 +339,18 @@ func OpenRegenerateStream(ctx context.Context, userName string, sessionID string
 		return nil, code_
 	}
 
-	redis_cache.DeleteMessages(sessionID)
+	_ = redis_cache.DeleteMessages(sessionID)
 	agentcommon.GetAgentManager().ClearAgent(sessionID)
 
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		return nil, code.CodeServerBusy
 	}
-
-	lastUserContent := getLastUserContent(history)
-	if lastUserContent == "" {
+	if getLastUserMessage(history) == nil {
 		return nil, code.CodeInvalidParams
 	}
 
-	return openStreamWithSession(ctx, userName, sessionID, lastUserContent, toolNames, thinkingMode)
+	return openStreamWithSession(ctx, userName, sessionID, "", toolNames, thinkingMode, false)
 }
 
 // Regenerate 重新生成同步响应
@@ -399,20 +359,51 @@ func Regenerate(ctx context.Context, userName string, sessionID string, fromInde
 		return nil, code_
 	}
 
-	redis_cache.DeleteMessages(sessionID)
+	_ = redis_cache.DeleteMessages(sessionID)
 	agentcommon.GetAgentManager().ClearAgent(sessionID)
 
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		return nil, code.CodeServerBusy
 	}
-
-	lastUserContent := getLastUserContent(history)
-	if lastUserContent == "" {
+	if getLastUserMessage(history) == nil {
 		return nil, code.CodeInvalidParams
 	}
 
-	return GenerateWithContext(ctx, userName, sessionID, lastUserContent, toolNames, thinkingMode)
+	agentMgr := agentcommon.GetAgentManager()
+	input := buildMessages(history, nil)
+	agentRunner, err := agentMgr.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
+	if err != nil {
+		log.Println("Regenerate GetOrCreateAgentWithTools error:", err)
+		return nil, code.AIModelFail
+	}
+
+	produced, finalMessage, err := agentcommon.GenerateProducedMessages(ctx, agentRunner, input)
+	if err != nil {
+		log.Println("Regenerate GenerateProducedMessages error:", err)
+		return nil, code.AIModelFail
+	}
+	if len(produced) == 0 && finalMessage != nil {
+		produced = append(produced, finalMessage)
+	}
+
+	startIndex := len(history)
+	lastIndex := persistProducedMessages(sessionID, userName, startIndex, produced)
+	if finalMessage == nil && len(produced) > 0 {
+		finalMessage = produced[len(produced)-1]
+	}
+	if finalMessage == nil {
+		finalMessage = &schema.Message{Role: schema.Assistant}
+	}
+	if lastIndex < startIndex {
+		lastIndex = startIndex
+	}
+
+	return &AgentResult{
+		SessionID:    sessionID,
+		MessageIndex: lastIndex,
+		Message:      finalMessage,
+	}, code.CodeSuccess
 }
 
 func validateRegenerateSession(sessionID string, fromIndex int) code.Code {
@@ -436,16 +427,30 @@ func validateRegenerateSession(sessionID string, fromIndex int) code.Code {
 	return code.CodeSuccess
 }
 
-func getLastUserContent(history []*model.Message) string {
+func getLastUserMessage(history []*model.Message) *model.Message {
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "user" {
-			return history[i].Content
+		if history[i] != nil && history[i].Role == string(schema.User) {
+			return history[i]
 		}
 	}
-	return ""
+	return nil
 }
 
 // GetMessages 获取会话消息列表
-func GetMessages(sessionID string, userName string) ([]model.Message, error) {
-	return message.GetMessagesBySessionIDOrdered(sessionID)
+func GetMessages(sessionID string, userName string) ([]HistoryMessageItem, error) {
+	msgs, err := message.GetMessagesBySessionIDOrdered(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]HistoryMessageItem, 0, len(msgs))
+	for _, msg := range msgs {
+		msgCopy := msg
+		items = append(items, HistoryMessageItem{
+			Index:     msg.Index,
+			Message:   msgCopy.GetSchemaMessage(),
+			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return items, nil
 }

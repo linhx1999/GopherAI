@@ -14,6 +14,7 @@ func TestGenerateMessageMQParamPreservesZeroIndexAndToolCalls(t *testing.T) {
 		UserName:  "tester",
 		Role:      "assistant",
 		Index:     0,
+		Payload:   json.RawMessage(`{"role":"assistant","content":"hello","reasoning_content":"先想"}`),
 		ToolCalls: json.RawMessage(`[{"tool_id":"tool-1","function":"knowledge_search","arguments":{"query":"go"}}]`),
 	}
 
@@ -33,11 +34,14 @@ func TestGenerateMessageMQParamPreservesZeroIndexAndToolCalls(t *testing.T) {
 	if string(param.ToolCalls) != string(msg.ToolCalls) {
 		t.Fatalf("unexpected tool calls payload: %s", string(param.ToolCalls))
 	}
+	if string(param.Payload) != string(msg.Payload) {
+		t.Fatalf("unexpected payload: %s", string(param.Payload))
+	}
 }
 
 func TestBuildMessageFromParamBackwardCompatibleWithoutIndex(t *testing.T) {
 	var param MessageMQParam
-	if err := json.Unmarshal([]byte(`{"session_id":"sess-2","content":"hi","user_name":"tester","role":"user"}`), &param); err != nil {
+	if err := json.Unmarshal([]byte(`{"session_id":"sess-2","content":"hi","user_name":"tester","role":"user","payload":{"role":"user","content":"hi"}}`), &param); err != nil {
 		t.Fatalf("json.Unmarshal returned error: %v", err)
 	}
 
@@ -47,5 +51,8 @@ func TestBuildMessageFromParamBackwardCompatibleWithoutIndex(t *testing.T) {
 	}
 	if msg.SessionID != "sess-2" || msg.Content != "hi" || msg.UserName != "tester" || msg.Role != "user" {
 		t.Fatalf("unexpected message: %#v", msg)
+	}
+	if string(msg.Payload) != `{"role":"user","content":"hi"}` {
+		t.Fatalf("unexpected payload: %s", string(msg.Payload))
 	}
 }

@@ -1,140 +1,154 @@
 package agent
 
 import (
+	"context"
 	"io"
 
+	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
-
-	"GopherAI/model"
 )
 
-type StreamEventType string
+type MessageSink func(*schema.Message) error
 
-const (
-	StreamEventTypeToolCall       StreamEventType = "tool_call"
-	StreamEventTypeReasoningDelta StreamEventType = "reasoning_delta"
-	StreamEventTypeReasoningEnd   StreamEventType = "reasoning_end"
-	StreamEventTypeContentDelta   StreamEventType = "content_delta"
-)
+// GenerateProducedMessages 执行同步生成，并返回 Agent 过程中的完整产出消息。
+func GenerateProducedMessages(ctx context.Context, runner *react.Agent, input []*schema.Message) ([]*schema.Message, *schema.Message, error) {
+	opt, future := react.WithMessageFuture()
 
-type StreamEvent struct {
-	Type     StreamEventType
-	Content  string
-	ToolCall *model.ToolCall
-}
-
-type StreamResult struct {
-	Content          string
-	ReasoningContent string
-	ToolCalls        []model.ToolCall
-}
-
-type StreamSink func(StreamEvent) error
-
-// ResultFromMessage 将同步生成结果转换为统一的聚合结果结构。
-func ResultFromMessage(msg *schema.Message) *StreamResult {
-	result := &StreamResult{}
-	if msg == nil {
-		return result
+	resp, err := runner.Generate(ctx, input, opt)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	result.Content = msg.Content
-	result.ReasoningContent = msg.ReasoningContent
-	if len(msg.ToolCalls) == 0 {
-		return result
-	}
-
-	result.ToolCalls = make([]model.ToolCall, 0, len(msg.ToolCalls))
-	for _, tc := range msg.ToolCalls {
-		result.ToolCalls = append(result.ToolCalls, convertToolCall(tc))
-	}
-
-	return result
-}
-
-// ConsumeStream 统一消费底层消息流，并输出聚合结果与结构化事件。
-func ConsumeStream(reader *schema.StreamReader[*schema.Message], thinkingMode bool, sink StreamSink) (*StreamResult, error) {
-	defer reader.Close()
-
-	result := &StreamResult{}
-	reasoningStarted := false
-	reasoningClosed := false
-
-	emit := func(event StreamEvent) error {
-		if sink == nil {
-			return nil
-		}
-		return sink(event)
-	}
-
-	closeReasoning := func() error {
-		if !thinkingMode || !reasoningStarted || reasoningClosed {
-			return nil
-		}
-		reasoningClosed = true
-		return emit(StreamEvent{Type: StreamEventTypeReasoningEnd})
-	}
-
+	iter := future.GetMessages()
+	produced := make([]*schema.Message, 0, 4)
 	for {
-		msg, err := reader.Recv()
+		msg, ok, err := iter.Next()
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			break
+		}
+		produced = append(produced, msg)
+	}
+
+	return produced, resp, nil
+}
+
+// StreamProducedMessages 执行流式生成，并按原始 chunk 顺序输出 schema.Message。
+func StreamProducedMessages(ctx context.Context, runner *react.Agent, input []*schema.Message, sink MessageSink) ([]*schema.Message, error) {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	opt, future := react.WithMessageFuture()
+	runErrCh := make(chan error, 1)
+	go func() {
+		sr, err := runner.Stream(runCtx, input, opt)
+		if sr != nil {
+			sr.Close()
+		}
+		runErrCh <- err
+	}()
+
+	iter := future.GetMessageStreams()
+	produced := make([]*schema.Message, 0, 4)
+	for {
+		sr, ok, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			break
+		}
+
+		full, err := consumeOneProducedStream(sr, sink)
+		if err != nil {
+			return nil, err
+		}
+		if full != nil {
+			produced = append(produced, full)
+		}
+	}
+
+	if err := <-runErrCh; err != nil {
+		return nil, err
+	}
+	return produced, nil
+}
+
+func consumeOneProducedStream(sr *schema.StreamReader[*schema.Message], sink MessageSink) (*schema.Message, error) {
+	defer sr.Close()
+
+	chunks := make([]*schema.Message, 0, 8)
+	var lastChunk *schema.Message
+	for {
+		msg, err := sr.Recv()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
-
-		for _, tc := range msg.ToolCalls {
-			toolCall := convertToolCall(tc)
-			result.ToolCalls = append(result.ToolCalls, toolCall)
-			toolCallCopy := toolCall
-			if err := emit(StreamEvent{
-				Type:     StreamEventTypeToolCall,
-				ToolCall: &toolCallCopy,
-			}); err != nil {
+		lastChunk = msg
+		chunks = append(chunks, msg)
+		if sink != nil {
+			if err := sink(msg); err != nil {
 				return nil, err
 			}
 		}
+	}
 
-		if msg.ReasoningContent != "" {
-			reasoningStarted = true
-			result.ReasoningContent += msg.ReasoningContent
-			if err := emit(StreamEvent{
-				Type:    StreamEventTypeReasoningDelta,
-				Content: msg.ReasoningContent,
-			}); err != nil {
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	if needsSyntheticFinish(lastChunk) {
+		synthetic := buildSyntheticFinishChunk(lastChunk)
+		chunks = append(chunks, synthetic)
+		if sink != nil {
+			if err := sink(synthetic); err != nil {
 				return nil, err
 			}
 		}
-
-		if msg.Content == "" {
-			continue
-		}
-
-		if err := closeReasoning(); err != nil {
-			return nil, err
-		}
-
-		result.Content += msg.Content
-		if err := emit(StreamEvent{
-			Type:    StreamEventTypeContentDelta,
-			Content: msg.Content,
-		}); err != nil {
-			return nil, err
-		}
 	}
 
-	if err := closeReasoning(); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return schema.ConcatMessages(chunks)
 }
 
-func convertToolCall(tc schema.ToolCall) model.ToolCall {
-	return model.ToolCall{
-		ToolID:    tc.ID,
-		Function:  tc.Function.Name,
-		Arguments: []byte(tc.Function.Arguments),
+func needsSyntheticFinish(msg *schema.Message) bool {
+	if msg == nil {
+		return false
 	}
+	return msg.ResponseMeta == nil || msg.ResponseMeta.FinishReason == ""
+}
+
+func buildSyntheticFinishChunk(msg *schema.Message) *schema.Message {
+	if msg == nil {
+		return &schema.Message{ResponseMeta: &schema.ResponseMeta{FinishReason: "stop"}}
+	}
+
+	chunk := &schema.Message{
+		Role:       msg.Role,
+		Name:       msg.Name,
+		ToolCallID: msg.ToolCallID,
+		ToolName:   msg.ToolName,
+		ResponseMeta: &schema.ResponseMeta{
+			FinishReason: "stop",
+		},
+	}
+
+	if len(msg.ToolCalls) > 0 {
+		chunk.ToolCalls = make([]schema.ToolCall, len(msg.ToolCalls))
+		for i, tc := range msg.ToolCalls {
+			chunk.ToolCalls[i] = schema.ToolCall{
+				Index: tc.Index,
+				ID:    tc.ID,
+				Type:  tc.Type,
+				Function: schema.FunctionCall{
+					Name: tc.Function.Name,
+				},
+			}
+		}
+	}
+
+	return chunk
 }

@@ -1,43 +1,86 @@
-import { Avatar, Typography } from 'antd'
-import { useEffect } from 'react'
-import { RobotOutlined } from '@ant-design/icons'
+import { Avatar, Collapse, Tag, Typography } from 'antd'
+import { RobotOutlined, ToolOutlined } from '@ant-design/icons'
 import { Bubble, Actions, Think } from '@ant-design/x'
-import XMarkdown from '@ant-design/x-markdown'
 import useStreamContent from '../hooks/useStreamContent'
 import { COLORS, MESSAGE_MAX_WIDTH } from '../config/constants'
-import { createMessageActions } from '../utils/helpers.jsx'
+import { createMessageActions, formatToolArguments, renderMarkdown } from '../utils/helpers.jsx'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
-// Markdown 渲染
-const renderMarkdown = (content) => <XMarkdown content={content} />
+const ProcessCard = ({ processes = [] }) => {
+  if (!processes.length) return null
 
-/**
- * 流式消息组件 - 使用 useStreamContent 实现逐字显示效果
- */
-const StreamBubble = ({ item, onActionClick, onReasoningDisplayComplete }) => {
-  const [streamContent, isDone] = useStreamContent(item.content, { step: 3, interval: 30 })
-  const [streamReasoning, isReasoningDone] = useStreamContent(item.reasoningContent || '', { step: 3, interval: 30 })
-  const isStreaming = !isDone
-  const isReasoningStreaming = item.streaming && !item.reasoningCompleted
-  const showReasoning = Boolean(item.reasoningContent)
-  const showAnswer = item.answerUnlocked && (Boolean(item.content) || !showReasoning)
-  const reasoningDisplayContent = isReasoningDone ? item.reasoningContent : streamReasoning
-  const answerDisplayContent = isDone ? item.content : streamContent
+  const items = processes.map((record) => {
+    const message = record.message || {}
+    const toolCalls = message.tool_calls || []
+    const isToolMessage = message.role === 'tool'
+    const toolTitle = isToolMessage ? (message.tool_name || '工具结果') : '工具调用'
 
-  useEffect(() => {
-    if (showReasoning && item.reasoningCompleted && isReasoningDone && !item.answerUnlocked) {
-      onReasoningDisplayComplete?.(item.key)
+    return {
+      key: record.key,
+      label: (
+        <span className="process-item-title">
+          <ToolOutlined />
+          <span>{toolTitle}</span>
+          {record.pending ? <Tag color="processing">执行中</Tag> : null}
+        </span>
+      ),
+      children: (
+        <div className="process-item-body">
+          {toolCalls.map((call, index) => (
+            <div key={`${record.key}-tool-${index}`} className="process-tool-call">
+              <Text strong>{call.function?.name || call.id || 'tool'}</Text>
+              <pre>{formatToolArguments(call.function?.arguments)}</pre>
+            </div>
+          ))}
+          {message.content ? (
+            <div className="process-tool-result">
+              {renderMarkdown(message.content)}
+            </div>
+          ) : null}
+          {!message.content && toolCalls.length === 0 ? (
+            <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+              暂无可展示内容
+            </Paragraph>
+          ) : null}
+        </div>
+      )
     }
-  }, [showReasoning, item.reasoningCompleted, isReasoningDone, item.answerUnlocked, item.key, onReasoningDisplayComplete])
+  })
+
+  return (
+    <Collapse
+      className="assistant-process-card"
+      defaultActiveKey={[]}
+      items={[{
+        key: 'processes',
+        label: `执行过程 (${processes.length})`,
+        children: <Collapse ghost items={items} />
+      }]}
+    />
+  )
+}
+
+const AssistantBubble = ({ record, processes, onActionClick }) => {
+  const message = record.message || {}
+  const [streamContent, isContentDone] = useStreamContent(message.content || '', { step: 3, interval: 30 })
+  const [streamReasoning, isReasoningDone] = useStreamContent(message.reasoning_content || '', { step: 3, interval: 30 })
+  const reasoningDisplayContent = isReasoningDone ? (message.reasoning_content || '') : streamReasoning
+  const answerDisplayContent = isContentDone ? (message.content || '') : streamContent
+  const isStreaming = record.pending && !isContentDone
+  const isReasoningStreaming = record.pending && !isReasoningDone
+  const showReasoning = Boolean(message.reasoning_content)
+  const showAnswer = Boolean(message.content)
 
   return (
     <div className="assistant-message">
-      {showReasoning && (
+      <ProcessCard processes={processes} />
+
+      {showReasoning ? (
         <Think
           title="深度思考"
           loading={isReasoningStreaming}
-          expanded={item.streaming ? true : undefined}
+          expanded
           defaultExpanded
           className="assistant-thinking"
           styles={{
@@ -50,9 +93,9 @@ const StreamBubble = ({ item, onActionClick, onReasoningDisplayComplete }) => {
         >
           {renderMarkdown(reasoningDisplayContent)}
         </Think>
-      )}
+      ) : null}
 
-      {showAnswer && (
+      {showAnswer ? (
         <Bubble
           placement="start"
           avatar={<Avatar icon={<RobotOutlined />} style={{ backgroundColor: COLORS.primary }} />}
@@ -61,14 +104,15 @@ const StreamBubble = ({ item, onActionClick, onReasoningDisplayComplete }) => {
           streaming={isStreaming}
           typing={false}
           contentRender={renderMarkdown}
-          footer={item.loading ? null : (
-            <Actions items={createMessageActions(false)} onClick={(info) => onActionClick(item, info)} />
+          footer={record.pending ? null : (
+            <Actions items={createMessageActions(false)} onClick={(info) => onActionClick(record, info)} />
           )}
           style={{ maxWidth: MESSAGE_MAX_WIDTH }}
         />
-      )}
+      ) : null}
     </div>
   )
 }
 
-export default StreamBubble
+export default AssistantBubble
+export { ProcessCard }

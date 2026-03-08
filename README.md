@@ -243,15 +243,17 @@ GopherAI/
 
 ### SSE 事件
 
-思考模式流式响应除现有 `content_delta` 外，还可能返回：
+流式响应保留一个首包元数据事件，其余 `data` 直接发送完整的 `schema.Message` JSON：
 
 ```text
-data: {"type":"reasoning_delta","content":"先确认问题约束..."}
-data: {"type":"reasoning_end","status":"completed"}
+data: {"type":"meta","session_id":"sess_001","message_index":4}
+data: {"role":"assistant","reasoning_content":"先确认问题约束..."}
+data: {"role":"assistant","content":"答案","response_meta":{"finish_reason":"stop"}}
+data: {"role":"tool","tool_name":"knowledge_search","content":"...","response_meta":{"finish_reason":"stop"}}
 ```
 
-后端基于 Eino 的 `agent.Stream(...).Recv()` 消费底层 `*schema.Message`。`common/agent` 统一完成流聚合，`service` 输出结构化事件 channel，`controller` 中的 `ChatHandler` 直接消费该事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。思维链和正文由不同 chunk 输出；服务端在收到第一个正文 chunk 前发送 `reasoning_end`，前端在本地逐字动画结束前不会回退到完整文本，因此思维链和正文都会保持连续流式展示。
-消息缓存和异步落库都会保留 `index` 与 `tool_calls`，同步与流式两条路径共享同一份 assistant 聚合结果。
+后端基于 Eino 的 `react.WithMessageFuture()` 捕获 Agent 过程中的每条产出消息流。`common/agent` 逐条消费 `MessageFuture.GetMessageStreams()` 返回的 `*schema.StreamReader[*schema.Message]`，原样向前端转发 `schema.Message` chunk，并在每条产出消息结束后用 `schema.ConcatMessages()` 聚合完整消息；如果底层未返回 `response_meta.finish_reason`，后端会补一个终止 chunk 以便前端稳定切分消息边界。`controller` 中的 `ChatHandler` 直接消费 service 事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。前端收到 `schema.Message` 后会分别累积 `reasoning_content` 和 `content`，并把工具调用/工具结果消息归入折叠的执行过程卡片。
+消息缓存和异步落库都会保留 `index`、`payload` 与 `tool_calls`，历史消息接口返回 `{index, message, created_at}`，其中 `message` 为完整 `schema.Message`，保证刷新回放和直播展示一致。
 
 ## 支持的 AI 模型
 
