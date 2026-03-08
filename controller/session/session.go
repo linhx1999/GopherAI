@@ -29,7 +29,7 @@ func GetUserSessionsByUserName(c *gin.Context) {
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
-		Data: []interface{}{gin.H{"sessions": userSessions}},
+		Data: gin.H{"sessions": userSessions},
 	})
 }
 
@@ -62,7 +62,7 @@ func DeleteSession(c *gin.Context) {
 
 func UpdateSessionTitle(c *gin.Context) {
 	userName := c.GetString("userName")
-	sessionID := c.Param("sessionId")
+	sessionID := c.Param("id")
 
 	if sessionID == "" {
 		c.JSON(http.StatusOK, controller.Response{

@@ -158,7 +158,7 @@ pnpm dev
 |------|------|------|
 | POST | `/api/v1/agent/generate` | 非流式生成消息 |
 | POST | `/api/v1/agent/stream` | SSE 流式生成消息 |
-| GET | `/api/v1/agent/:session_id/messages` | 获取会话消息 |
+| GET | `/api/v1/agent/:session_id/messages` | 获取当前用户的会话消息 |
 | GET | `/api/v1/tools` | 获取可用工具列表 |
 
 ### 其他接口
@@ -285,6 +285,57 @@ data: {"role":"tool","tool_name":"knowledge_search","content":"...","response_me
 
 后端基于 Eino 的 `react.WithMessageFuture()` 捕获 Agent 过程中的每条产出消息流。`common/agent` 逐条消费 `MessageFuture.GetMessageStreams()` 返回的 `*schema.StreamReader[*schema.Message]`，原样向前端转发 `schema.Message` chunk，并在每条产出消息结束后用 `schema.ConcatMessages()` 聚合完整消息；如果底层未返回 `response_meta.finish_reason`，后端会补一个终止 chunk 以便前端稳定切分消息边界。`controller` 中的 `StreamHandler` 直接消费 service 事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。前端收到 `schema.Message` 后会分别累积 `reasoning_content` 和 `content`，并把工具调用/工具结果消息归入折叠的执行过程卡片。
 消息缓存和异步落库都会保留 `index`、`payload` 与 `tool_calls`，历史消息接口返回 `{index, message, created_at}`，其中 `message` 为完整 `schema.Message`，保证刷新回放和直播展示一致。
+
+### 历史消息接口示例
+
+`GET /api/v1/agent/:session_id/messages`
+
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "session_id": "sess_001",
+    "messages": [
+      {
+        "index": 0,
+        "message": {
+          "role": "user",
+          "content": "你好"
+        },
+        "created_at": "2026-03-08T23:53:44+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+- 仅允许读取当前用户自己的会话历史；`session_id` 不存在或不属于当前用户时统一返回 `code=2011`
+- 前端直接读取 `data.messages`，不再使用 `data[0].messages`
+
+### 会话列表接口示例
+
+`GET /api/v1/sessions`
+
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "sessions": [
+      {
+        "sessionId": "sess_001",
+        "title": "新会话",
+        "createdAt": "2026-03-08T23:53:44+08:00"
+      }
+    ]
+  }
+}
+```
+
+- 只返回当前用户自己的会话
+- 前端直接读取 `data.sessions`，并按 `createdAt` 排序
 
 ## 支持的 AI 模型
 

@@ -37,7 +37,7 @@ const SessionSider = ({
         onClick={(e) => e.stopPropagation()}
       />
     ) : session.title || `会话 ${session.id}`,
-    timestamp: session.timestamp
+    timestamp: session.createdAt
   }))
 
   return (

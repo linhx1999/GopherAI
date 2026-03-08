@@ -85,12 +85,9 @@ func GetMessages(c *gin.Context) {
 	sessionID := c.Param("session_id")
 	userName := c.GetString("userName")
 
-	messages, err := agentService.GetMessages(sessionID, userName)
-	if err != nil {
-		c.JSON(http.StatusOK, controller.Response{
-			Code: code.CodeServerBusy,
-			Msg:  "Failed to get messages",
-		})
+	messages, code_ := agentService.ListHistoryMessages(sessionID, userName)
+	if code_ != code.CodeSuccess {
+		writeCodeResponse(c, code_)
 		return
 	}
 

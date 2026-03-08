@@ -17,22 +17,35 @@ func CreateSession(session *model.Session) (*model.Session, error) {
 	return session, err
 }
 
-func GetSessionByID(sessionID string) (*model.Session, error) {
+func GetSessionByIDAndUserName(sessionID string, userName string) (*model.Session, error) {
 	var session model.Session
-	err := postgres.DB.Where("id = ?", sessionID).First(&session).Error
-	return &session, err
+	err := postgres.DB.
+		Where("id = ? AND user_name = ?", sessionID, userName).
+		First(&session).Error
+	if err != nil {
+		return nil, err
+	}
+	return &session, nil
 }
 
-func DeleteSession(sessionID string, userName string) error {
-	result := postgres.DB.Where("id = ? AND user_name = ?", sessionID, userName).Delete(&model.Session{})
-	return result.Error
+func DeleteSessionByIDAndUserName(sessionID string, userName string) (bool, error) {
+	result := postgres.DB.
+		Where("id = ? AND user_name = ?", sessionID, userName).
+		Delete(&model.Session{})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
 
-func UpdateSessionTitle(sessionID string, userName string, title string) error {
+func UpdateSessionTitleByIDAndUserName(sessionID string, userName string, title string) (bool, error) {
 	result := postgres.DB.Model(&model.Session{}).
 		Where("id = ? AND user_name = ?", sessionID, userName).
 		Update("title", title)
 	log.Printf("UpdateSessionTitle: sessionID=%s, userName=%s, title=%s, rowsAffected=%d, error=%v\n",
 		sessionID, userName, title, result.RowsAffected, result.Error)
-	return result.Error
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }

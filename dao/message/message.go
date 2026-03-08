@@ -5,23 +5,6 @@ import (
 	"GopherAI/model"
 )
 
-// GetMessagesBySessionID 根据会话ID获取消息列表
-func GetMessagesBySessionID(sessionID string) ([]model.Message, error) {
-	var msgs []model.Message
-	err := postgres.DB.Where("session_id = ?", sessionID).Order("created_at asc").Find(&msgs).Error
-	return msgs, err
-}
-
-// GetMessagesBySessionIDs 根据多个会话ID获取消息列表
-func GetMessagesBySessionIDs(sessionIDs []string) ([]model.Message, error) {
-	var msgs []model.Message
-	if len(sessionIDs) == 0 {
-		return msgs, nil
-	}
-	err := postgres.DB.Where("session_id IN ?", sessionIDs).Order("created_at asc").Find(&msgs).Error
-	return msgs, err
-}
-
 // CreateMessage 创建消息
 func CreateMessage(message *model.Message) (*model.Message, error) {
 	err := postgres.DB.Create(message).Error
@@ -45,11 +28,11 @@ func GetNextMessageIndex(sessionID string) (int, error) {
 	return maxIndex + 1, err
 }
 
-// GetMessagesBySessionIDOrdered 按索引获取消息列表
-func GetMessagesBySessionIDOrdered(sessionID string) ([]model.Message, error) {
+// ListMessagesBySessionAndUserOrdered 按索引获取指定用户的会话消息列表
+func ListMessagesBySessionAndUserOrdered(sessionID string, userName string) ([]model.Message, error) {
 	var msgs []model.Message
 	err := postgres.DB.
-		Where("session_id = ?", sessionID).
+		Where("session_id = ? AND user_name = ?", sessionID, userName).
 		Order("\"index\" asc").
 		Find(&msgs).Error
 	return msgs, err

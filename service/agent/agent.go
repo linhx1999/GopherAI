@@ -2,19 +2,21 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	agentcommon "GopherAI/common/agent"
 	"GopherAI/common/code"
 	"GopherAI/common/rabbitmq"
 	redis_cache "GopherAI/common/redis"
-	"GopherAI/dao/message"
-	"GopherAI/dao/session"
+	messageDAO "GopherAI/dao/message"
+	sessionDAO "GopherAI/dao/session"
 	"GopherAI/model"
 )
 
@@ -178,35 +180,47 @@ func emitEvent(ctx context.Context, events chan<- StreamEvent, event StreamEvent
 	}
 }
 
-// getMessagesFromRedis 从 Redis 获取消息历史（Cache-Aside 模式）
-func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
-	messages, err := redis_cache.GetMessages(sessionID)
+func loadOwnedSession(sessionID string, userName string) (*model.Session, code.Code) {
+	session, err := sessionDAO.GetSessionByIDAndUserName(sessionID, userName)
+	if err == nil {
+		return session, code.CodeSuccess
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, code.CodeSessionNotFound
+	}
+	log.Printf("loadOwnedSession error: %v", err)
+	return nil, code.CodeServerBusy
+}
+
+// getSessionHistory 从 Redis 获取消息历史，并在缓存未命中时回源数据库。
+func getSessionHistory(sessionID string, userName string) ([]*model.Message, error) {
+	cachedMessages, err := redis_cache.GetMessages(sessionID)
 	if err != nil {
-		log.Printf("getMessagesFromRedis redis error: %v", err)
-	} else if len(messages) > 0 {
-		return messages, nil
+		log.Printf("getSessionHistory redis error: %v", err)
+	} else if len(cachedMessages) > 0 {
+		return cachedMessages, nil
 	}
 
-	dbMessages, err := message.GetMessagesBySessionIDOrdered(sessionID)
+	dbMessages, err := messageDAO.ListMessagesBySessionAndUserOrdered(sessionID, userName)
 	if err != nil {
-		log.Printf("getMessagesFromRedis db error: %v", err)
+		log.Printf("getSessionHistory db error: %v", err)
 		return nil, err
 	}
 
-	result := make([]*model.Message, 0, len(dbMessages))
+	history := make([]*model.Message, 0, len(dbMessages))
 	for i := range dbMessages {
-		result = append(result, &dbMessages[i])
+		history = append(history, &dbMessages[i])
 	}
 
-	if len(result) > 0 {
+	if len(history) > 0 {
 		go func() {
-			if err := redis_cache.CacheMessages(sessionID, result); err != nil {
-				log.Printf("getMessagesFromRedis cache to redis error: %v", err)
+			if err := redis_cache.CacheMessages(sessionID, history); err != nil {
+				log.Printf("getSessionHistory cache to redis error: %v", err)
 			}
 		}()
 	}
 
-	return result, nil
+	return history, nil
 }
 
 func createSession(userName string, title string) (string, code.Code) {
@@ -215,7 +229,7 @@ func createSession(userName string, title string) (string, code.Code) {
 		UserName: userName,
 		Title:    title,
 	}
-	createdSession, err := session.CreateSession(newSession)
+	createdSession, err := sessionDAO.CreateSession(newSession)
 	if err != nil {
 		log.Println("createSession error:", err)
 		return "", code.CodeServerBusy
@@ -231,11 +245,15 @@ func prepareAgentRun(ctx context.Context, req GenerateRequest) (*preparedAgentRu
 		if code_ != code.CodeSuccess {
 			return nil, code_
 		}
+	} else {
+		if _, code_ := loadOwnedSession(sessionID, req.UserName); code_ != code.CodeSuccess {
+			return nil, code_
+		}
 	}
 
-	history, err := getMessagesFromRedis(sessionID)
+	history, err := getSessionHistory(sessionID, req.UserName)
 	if err != nil {
-		log.Println("prepareAgentRun getMessagesFromRedis error:", err)
+		log.Println("prepareAgentRun getSessionHistory error:", err)
 		return nil, code.CodeServerBusy
 	}
 
@@ -334,11 +352,16 @@ func Stream(ctx context.Context, req GenerateRequest) (*StreamHandle, code.Code)
 	}, code.CodeSuccess
 }
 
-// GetMessages 获取会话消息列表
-func GetMessages(sessionID string, userName string) ([]HistoryMessageItem, error) {
-	msgs, err := message.GetMessagesBySessionIDOrdered(sessionID)
+// ListHistoryMessages 获取当前用户的会话消息列表。
+func ListHistoryMessages(sessionID string, userName string) ([]HistoryMessageItem, code.Code) {
+	if _, code_ := loadOwnedSession(sessionID, userName); code_ != code.CodeSuccess {
+		return nil, code_
+	}
+
+	msgs, err := messageDAO.ListMessagesBySessionAndUserOrdered(sessionID, userName)
 	if err != nil {
-		return nil, err
+		log.Println("ListHistoryMessages error:", err)
+		return nil, code.CodeServerBusy
 	}
 
 	items := make([]HistoryMessageItem, 0, len(msgs))
@@ -350,5 +373,5 @@ func GetMessages(sessionID string, userName string) ([]HistoryMessageItem, error
 			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
 		})
 	}
-	return items, nil
+	return items, code.CodeSuccess
 }

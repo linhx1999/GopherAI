@@ -22,6 +22,37 @@ const MESSAGE_RENDER_MODE = {
   STREAM: 'stream'
 }
 
+const parseSessionListResponse = (responseData) => {
+  const sessionList = responseData?.data?.sessions
+  if (!Array.isArray(sessionList)) {
+    return []
+  }
+
+  return sessionList
+    .map((session) => ({
+      id: String(session.sessionId),
+      title: session.title || `会话 ${session.sessionId}`,
+      createdAt: session.createdAt || null
+    }))
+    .sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0))
+}
+
+const parseHistoryResponse = (responseData) => {
+  const history = responseData?.data?.messages
+  if (!Array.isArray(history)) {
+    return []
+  }
+
+  return history.map((item) => createRecord({
+    key: `msg_${item.index}_${item.message?.role || 'unknown'}`,
+    index: item.index,
+    message: item.message || {},
+    pending: false,
+    createdAt: item.created_at,
+    renderMode: MESSAGE_RENDER_MODE.INSTANT
+  }))
+}
+
 const createRecord = ({
   key = generateMessageId(),
   index = null,
@@ -43,6 +74,7 @@ const createRecord = ({
 const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
+  const latestHistorySessionRef = useRef(null)
 
   const [selectedTools, setSelectedTools] = useState([])
   const [thinkingMode, setThinkingMode] = useState(false)
@@ -66,14 +98,7 @@ const useChat = () => {
     try {
       const response = await api.get(API_ENDPOINTS.SESSIONS)
       if (response.data?.code === STATUS_CODES.SUCCESS) {
-        const sessionItems = (response.data.data?.[0]?.sessions || [])
-          .map((s) => ({
-            id: String(s.sessionId),
-            title: s.title || `会话 ${s.sessionId}`,
-            createdAt: s.createdAt
-          }))
-          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        setSessions(sessionItems)
+        setSessions(parseSessionListResponse(response.data))
       }
     } catch (error) {
       console.error('Load sessions error:', error)
@@ -85,30 +110,40 @@ const useChat = () => {
   }, [loadSessions])
 
   const loadMessages = useCallback(async (sessionId) => {
+    const targetSessionId = String(sessionId)
+    latestHistorySessionRef.current = targetSessionId
+
     try {
-      const response = await api.get(API_ENDPOINTS.AGENT_MESSAGES(sessionId))
-      if (response.data?.code === STATUS_CODES.SUCCESS && Array.isArray(response.data.data?.[0]?.messages)) {
-        const historyMessages = response.data.data[0].messages.map((item) => createRecord({
-          key: `msg_${item.index}_${item.message?.role || 'unknown'}`,
-          index: item.index,
-          message: item.message || {},
-          pending: false,
-          createdAt: item.created_at,
-          renderMode: MESSAGE_RENDER_MODE.INSTANT
-        }))
-        setMessages(historyMessages)
-      } else {
-        setMessages([])
+      const response = await api.get(API_ENDPOINTS.AGENT_MESSAGES(targetSessionId))
+      if (latestHistorySessionRef.current !== targetSessionId) {
+        return
+      }
+
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
+        setMessages(parseHistoryResponse(response.data))
+        return
+      }
+
+      setMessages([])
+      if (response.data?.msg) {
+        message.error(response.data.msg)
       }
     } catch (err) {
+      if (latestHistorySessionRef.current !== targetSessionId) {
+        return
+      }
       console.error('Load history error:', err)
       setMessages([])
     }
-  }, [])
+  }, [message])
 
   const createSession = useCallback(() => {
-    setSessions((prev) => prev.filter((s) => s.id !== SPECIAL_SESSIONS.TEMP))
-    setSessions((prev) => [{ id: SPECIAL_SESSIONS.TEMP, title: '新会话', timestamp: Date.now() }, ...prev])
+    const createdAt = new Date().toISOString()
+    latestHistorySessionRef.current = SPECIAL_SESSIONS.TEMP
+    setSessions((prev) => {
+      const nextSessions = prev.filter((session) => session.id !== SPECIAL_SESSIONS.TEMP)
+      return [{ id: SPECIAL_SESSIONS.TEMP, title: '新会话', createdAt }, ...nextSessions]
+    })
     setActiveKey(SPECIAL_SESSIONS.TEMP)
     setIsTempSession(true)
     setMessages([])
@@ -117,14 +152,18 @@ const useChat = () => {
 
   const switchSession = useCallback(async (sessionId) => {
     if (!sessionId) return
+
     setActiveKey(sessionId)
-    setIsTempSession(false)
     setCurrentPage(1)
-    if (sessionId !== SPECIAL_SESSIONS.TEMP) {
-      await loadMessages(sessionId)
-    } else {
+    if (sessionId === SPECIAL_SESSIONS.TEMP) {
+      latestHistorySessionRef.current = SPECIAL_SESSIONS.TEMP
+      setIsTempSession(true)
       setMessages([])
+      return
     }
+
+    setIsTempSession(false)
+    await loadMessages(sessionId)
   }, [loadMessages])
 
   const deleteSession = useCallback(async (sessionId) => {
@@ -209,10 +248,11 @@ const useChat = () => {
     const newSid = String(sessionId)
     if (isTempSession) {
       setSessions((prev) => prev.map((s) => (
-        s.id === SPECIAL_SESSIONS.TEMP ? { id: newSid, title: '新会话', timestamp: Date.now() } : s
+        s.id === SPECIAL_SESSIONS.TEMP ? { ...s, id: newSid } : s
       )))
       setActiveKey(newSid)
       setIsTempSession(false)
+      latestHistorySessionRef.current = newSid
     } else if (!sessions.some((s) => s.id === newSid)) {
       loadSessions()
     }

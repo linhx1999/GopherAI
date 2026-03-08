@@ -248,7 +248,7 @@ MCP Server → 注册工具 → HTTP SSE 接口 → MCP Client 连接 → 工具
 |------|------|------|
 | POST | `/api/v1/agent/generate` | 非流式生成消息 |
 | POST | `/api/v1/agent/stream` | SSE 流式生成消息 |
-| GET | `/api/v1/agent/:session_id/messages` | 获取消息列表 |
+| GET | `/api/v1/agent/:session_id/messages` | 获取当前用户的会话消息列表 |
 
 **工具接口**:
 | 方法 | 路径 | 说明 |
@@ -258,7 +258,7 @@ MCP Server → 注册工具 → HTTP SSE 接口 → MCP Client 连接 → 工具
 **会话管理**:
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/sessions` | 获取会话列表 |
+| GET | `/api/v1/sessions` | 获取当前用户会话列表 |
 | DELETE | `/api/v1/sessions/:id` | 删除会话 |
 | PUT | `/api/v1/sessions/:id/title` | 更新会话标题 |
 
@@ -336,6 +336,58 @@ data: {"role":"tool","tool_name":"knowledge_search","content":"...","response_me
 - HTTP SSE 由 Controller 直接消费 service 事件流并统一使用 Gin `c.Stream` 逐条输出；channel 关闭时追加 `data: [DONE]`，客户端断连时取消信号会沿 `request.Context()` 继续传递给上游流式生成
 - 前端同时展示 `reasoning_content` 和 `content`，并按 `response_meta.finish_reason` 切分多条产出消息
 - 中间的 `assistant(tool_calls)` 与 `tool` 消息会在前端归入折叠的执行过程卡片，最终 `assistant` 文本消息作为主气泡展示
+
+#### GET /api/v1/agent/:session_id/messages
+
+**响应体**:
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "session_id": "sess_001",
+    "messages": [
+      {
+        "index": 0,
+        "message": {
+          "role": "user",
+          "content": "你好"
+        },
+        "created_at": "2026-03-08T23:53:44+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+说明：
+- 仅允许读取当前用户自己的会话历史；`session_id` 不存在或不属于当前用户时统一返回 `CodeSessionNotFound`
+- service 层会先校验会话归属，再访问 Redis/DB 历史消息，避免仅凭 `session_id` 读取他人消息
+- 前端聊天页直接读取 `response.data.data.messages`
+
+#### GET /api/v1/sessions
+
+**响应体**:
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "sessions": [
+      {
+        "sessionId": "sess_001",
+        "title": "新会话",
+        "createdAt": "2026-03-08T23:53:44+08:00"
+      }
+    ]
+  }
+}
+```
+
+说明：
+- 只返回当前用户自己的会话
+- 前端聊天页直接读取 `response.data.data.sessions`，并按 `createdAt` 排序
 
 ### 可用工具
 

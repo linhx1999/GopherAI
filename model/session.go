@@ -22,6 +22,7 @@ type Session struct {
 type SessionInfo struct {
 	SessionID string `json:"sessionId"`
 	Title     string `json:"title"`
+	CreatedAt string `json:"createdAt"`
 }
 
 // GetTools 获取工具列表
