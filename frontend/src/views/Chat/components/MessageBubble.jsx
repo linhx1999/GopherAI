@@ -64,22 +64,25 @@ const ProcessCard = ({ processes = [] }) => {
 const AssistantBubble = ({ record, processes, onActionClick }) => {
   const message = record.message || {}
   const shouldAnimate = record.renderMode === 'stream' && record.pending
+  const rawReasoningContent = message.reasoning_content || ''
+  const rawAnswerContent = message.content || ''
   const [streamContent, isContentDone] = useStreamContent(message.content || '', {
     step: 3,
     interval: 30,
     enabled: shouldAnimate
   })
-  const [streamReasoning, isReasoningDone] = useStreamContent(message.reasoning_content || '', {
+  const [streamReasoning, isReasoningDone] = useStreamContent(rawReasoningContent, {
     step: 3,
     interval: 30,
     enabled: shouldAnimate
   })
-  const reasoningDisplayContent = shouldAnimate && !isReasoningDone ? streamReasoning : (message.reasoning_content || '')
-  const answerDisplayContent = shouldAnimate && !isContentDone ? streamContent : (message.content || '')
+  const reasoningDisplayContent = shouldAnimate && !isReasoningDone ? streamReasoning : rawReasoningContent
+  const answerDisplayContent = shouldAnimate && !isContentDone ? streamContent : rawAnswerContent
   const isStreaming = shouldAnimate && !isContentDone
-  const isReasoningStreaming = shouldAnimate && !isReasoningDone
-  const showReasoning = Boolean(message.reasoning_content)
-  const showAnswer = Boolean(message.content)
+  const showReasoningPlaceholder = Boolean(record.expectReasoning) && shouldAnimate && !rawReasoningContent.trim() && !rawAnswerContent.trim()
+  const showReasoning = Boolean(rawReasoningContent) || showReasoningPlaceholder
+  const showAnswer = Boolean(rawAnswerContent)
+  const reasoningLoading = showReasoning && shouldAnimate && !rawAnswerContent.trim()
 
   return (
     <div className="assistant-message">
@@ -88,7 +91,7 @@ const AssistantBubble = ({ record, processes, onActionClick }) => {
       {showReasoning ? (
         <Think
           title="深度思考"
-          loading={isReasoningStreaming}
+          loading={reasoningLoading}
           expanded
           defaultExpanded
           className="assistant-thinking"

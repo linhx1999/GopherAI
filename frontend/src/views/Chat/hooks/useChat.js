@@ -28,14 +28,16 @@ const createRecord = ({
   message,
   pending = false,
   createdAt = null,
-  renderMode = MESSAGE_RENDER_MODE.INSTANT
+  renderMode = MESSAGE_RENDER_MODE.INSTANT,
+  expectReasoning = false
 }) => ({
   key,
   index,
   message,
   pending,
   createdAt,
-  renderMode
+  renderMode,
+  expectReasoning
 })
 
 const useChat = () => {
@@ -248,7 +250,8 @@ const useChat = () => {
         index: nextMessageIndex,
         message: mergeSchemaMessageChunk({}, chunk),
         pending: !isMessageFinished(chunk),
-        renderMode: MESSAGE_RENDER_MODE.STREAM
+        renderMode: MESSAGE_RENDER_MODE.STREAM,
+        expectReasoning: thinkingMode && chunk.role === MESSAGE_ROLES.ASSISTANT
       })
       if (nextMessageIndex !== null) {
         nextMessageIndex += 1
