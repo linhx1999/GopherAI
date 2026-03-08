@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
@@ -16,8 +17,6 @@ import (
 	"GopherAI/dao/session"
 	"GopherAI/model"
 )
-
-var ctx = context.Background()
 
 // SystemPrompt Agent 系统提示词
 const SystemPrompt = `你是一个智能助手，可以帮助用户解答各种问题。
@@ -57,8 +56,17 @@ type StreamHandle struct {
 	Events    <-chan StreamEvent
 }
 
-// AgentResult Agent 执行结果
-type AgentResult struct {
+// GenerateRequest 表示一次消息生成请求。
+type GenerateRequest struct {
+	UserName     string
+	SessionID    string
+	UserMessage  string
+	ToolNames    []string
+	ThinkingMode bool
+}
+
+// GenerateResult 表示非流式生成结果。
+type GenerateResult struct {
 	SessionID    string          `json:"session_id"`
 	MessageIndex int             `json:"message_index"`
 	Message      *schema.Message `json:"message"`
@@ -69,6 +77,14 @@ type HistoryMessageItem struct {
 	Index     int             `json:"index"`
 	Message   *schema.Message `json:"message"`
 	CreatedAt string          `json:"created_at"`
+}
+
+type preparedAgentRun struct {
+	sessionID        string
+	userName         string
+	prompt           []*schema.Message
+	outputStartIndex int
+	runner           *react.Agent
 }
 
 func NewErrorEvent(message string) StreamEvent {
@@ -193,8 +209,7 @@ func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 	return result, nil
 }
 
-// CreateSessionOnly 仅创建会话（用于流式响应）
-func CreateSessionOnly(userName string, title string) (string, code.Code) {
+func createSession(userName string, title string) (string, code.Code) {
 	newSession := &model.Session{
 		ID:       uuid.New().String(),
 		UserName: userName,
@@ -202,39 +217,55 @@ func CreateSessionOnly(userName string, title string) (string, code.Code) {
 	}
 	createdSession, err := session.CreateSession(newSession)
 	if err != nil {
-		log.Println("CreateSessionOnly error:", err)
+		log.Println("createSession error:", err)
 		return "", code.CodeServerBusy
 	}
 	return createdSession.ID, code.CodeSuccess
 }
 
-// Generate 同步生成响应
-func Generate(userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
-	return GenerateWithContext(ctx, userName, sessionID, userContent, toolNames, thinkingMode)
-}
-
-// GenerateWithContext 带上下文的同步生成响应
-func GenerateWithContext(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
-	agentMgr := agentcommon.GetAgentManager()
+func prepareAgentRun(ctx context.Context, req GenerateRequest) (*preparedAgentRun, code.Code) {
+	sessionID := req.SessionID
+	if sessionID == "" {
+		var code_ code.Code
+		sessionID, code_ = createSession(req.UserName, req.UserMessage)
+		if code_ != code.CodeSuccess {
+			return nil, code_
+		}
+	}
 
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
-		log.Println("Generate getMessagesFromRedis error:", err)
+		log.Println("prepareAgentRun getMessagesFromRedis error:", err)
 		return nil, code.CodeServerBusy
 	}
 
-	userMessage := schema.UserMessage(userContent)
-	nextIndex := len(history)
-	persistMessage(buildStoredMessage(sessionID, userName, nextIndex, userMessage))
+	userMessageIndex := len(history)
+	userMessage := schema.UserMessage(req.UserMessage)
+	persistMessage(buildStoredMessage(sessionID, req.UserName, userMessageIndex, userMessage))
 
-	input := buildMessages(history, userMessage)
-	agentRunner, err := agentMgr.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
+	runner, err := agentcommon.GetAgentManager().GetOrCreateAgentWithTools(ctx, sessionID, req.UserName, req.ToolNames, req.ThinkingMode)
 	if err != nil {
-		log.Println("Generate GetOrCreateAgentWithTools error:", err)
+		log.Println("prepareAgentRun GetOrCreateAgentWithTools error:", err)
 		return nil, code.AIModelFail
 	}
 
-	produced, finalMessage, err := agentcommon.GenerateProducedMessages(ctx, agentRunner, input)
+	return &preparedAgentRun{
+		sessionID:        sessionID,
+		userName:         req.UserName,
+		prompt:           buildMessages(history, userMessage),
+		outputStartIndex: userMessageIndex + 1,
+		runner:           runner,
+	}, code.CodeSuccess
+}
+
+// Generate 同步生成响应。
+func Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, code.Code) {
+	run, code_ := prepareAgentRun(ctx, req)
+	if code_ != code.CodeSuccess {
+		return nil, code_
+	}
+
+	produced, finalMessage, err := agentcommon.GenerateProducedMessages(ctx, run.runner, run.prompt)
 	if err != nil {
 		log.Println("Generate error:", err)
 		return nil, code.AIModelFail
@@ -243,59 +274,29 @@ func GenerateWithContext(ctx context.Context, userName string, sessionID string,
 		produced = append(produced, finalMessage)
 	}
 
-	lastIndex := persistProducedMessages(sessionID, userName, nextIndex+1, produced)
+	lastIndex := persistProducedMessages(run.sessionID, run.userName, run.outputStartIndex, produced)
 	if finalMessage == nil && len(produced) > 0 {
 		finalMessage = produced[len(produced)-1]
 	}
 	if finalMessage == nil {
 		finalMessage = &schema.Message{Role: schema.Assistant}
 	}
-	if lastIndex < nextIndex+1 {
-		lastIndex = nextIndex
+	if lastIndex < run.outputStartIndex {
+		lastIndex = run.outputStartIndex - 1
 	}
 
-	return &AgentResult{
-		SessionID:    sessionID,
+	return &GenerateResult{
+		SessionID:    run.sessionID,
 		MessageIndex: lastIndex,
 		Message:      finalMessage,
 	}, code.CodeSuccess
 }
 
-// OpenStreamWithMeta 打开一个可供 controller 消费的 SSE 事件流。
-func OpenStreamWithMeta(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	if sessionID == "" {
-		var code_ code.Code
-		sessionID, code_ = CreateSessionOnly(userName, userContent)
-		if code_ != code.CodeSuccess {
-			return nil, code_
-		}
-	}
-
-	return openStreamWithSession(ctx, userName, sessionID, userContent, toolNames, thinkingMode, true)
-}
-
-func openStreamWithSession(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool, persistUser bool) (*StreamHandle, code.Code) {
-	agentMgr := agentcommon.GetAgentManager()
-
-	history, err := getMessagesFromRedis(sessionID)
-	if err != nil {
-		log.Println("OpenStream getMessagesFromRedis error:", err)
-		return nil, code.CodeServerBusy
-	}
-
-	var userMessage *schema.Message
-	startIndex := len(history)
-	if persistUser {
-		userMessage = schema.UserMessage(userContent)
-		persistMessage(buildStoredMessage(sessionID, userName, startIndex, userMessage))
-		startIndex++
-	}
-
-	input := buildMessages(history, userMessage)
-	agentRunner, err := agentMgr.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
-	if err != nil {
-		log.Println("OpenStream GetOrCreateAgentWithTools error:", err)
-		return nil, code.AIModelFail
+// Stream 打开一个可供 controller 消费的 SSE 事件流。
+func Stream(ctx context.Context, req GenerateRequest) (*StreamHandle, code.Code) {
+	run, code_ := prepareAgentRun(ctx, req)
+	if code_ != code.CodeSuccess {
+		return nil, code_
 	}
 
 	events := make(chan StreamEvent)
@@ -305,30 +306,30 @@ func openStreamWithSession(ctx context.Context, userName string, sessionID strin
 		if err := emitEvent(ctx, events, StreamEvent{
 			Meta: &StreamMeta{
 				Type:         StreamPayloadTypeMeta,
-				SessionID:    sessionID,
-				MessageIndex: startIndex,
+				SessionID:    run.sessionID,
+				MessageIndex: run.outputStartIndex,
 			},
 		}); err != nil {
 			return
 		}
 
-		produced, err := agentcommon.StreamProducedMessages(ctx, agentRunner, input, func(msg *schema.Message) error {
+		produced, err := agentcommon.StreamProducedMessages(ctx, run.runner, run.prompt, func(msg *schema.Message) error {
 			return emitEvent(ctx, events, StreamEvent{Message: msg})
 		})
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Println("OpenStream StreamProducedMessages error:", err)
+			log.Println("Stream StreamProducedMessages error:", err)
 			_ = emitEvent(ctx, events, NewErrorEvent("agent stream failed"))
 			return
 		}
 
-		persistProducedMessages(sessionID, userName, startIndex, produced)
+		persistProducedMessages(run.sessionID, run.userName, run.outputStartIndex, produced)
 	}()
 
 	return &StreamHandle{
-		SessionID: sessionID,
+		SessionID: run.sessionID,
 		Events:    events,
 	}, code.CodeSuccess
 }

@@ -156,7 +156,8 @@ pnpm dev
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/v1/agent` | 发送消息，支持普通与思考模式 |
+| POST | `/api/v1/agent/generate` | 非流式生成消息 |
+| POST | `/api/v1/agent/stream` | SSE 流式生成消息 |
 | GET | `/api/v1/agent/:session_id/messages` | 获取会话消息 |
 | GET | `/api/v1/tools` | 获取可用工具列表 |
 
@@ -230,15 +231,44 @@ GopherAI/
 - 开启思考模式的实时回复会先显示 `Think` loading 占位，并在最终回答正文开始输出前保持 loading；历史消息则直接展示完整内容
 - 如果模型未返回推理内容，则只展示最终回答
 
-### Agent 请求示例
+### Agent Generate 请求示例
 
 ```json
 {
   "session_id": "sess_001",
   "message": "帮我分析一下这个方案",
   "tools": ["knowledge_search"],
-  "thinking_mode": true,
-  "stream": true
+  "thinking_mode": true
+}
+```
+
+### Agent Generate 响应示例
+
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "session_id": "sess_001",
+    "message_index": 4,
+    "message": {
+      "role": "assistant",
+      "reasoning_content": "先确认需求边界...",
+      "content": "可以按接口职责拆分为 generate 和 stream。",
+      "tool_calls": []
+    }
+  }
+}
+```
+
+### Agent Stream 请求示例
+
+```json
+{
+  "session_id": "sess_001",
+  "message": "帮我分析一下这个方案",
+  "tools": ["knowledge_search"],
+  "thinking_mode": true
 }
 ```
 
@@ -253,7 +283,7 @@ data: {"role":"assistant","content":"答案","response_meta":{"finish_reason":"s
 data: {"role":"tool","tool_name":"knowledge_search","content":"...","response_meta":{"finish_reason":"stop"}}
 ```
 
-后端基于 Eino 的 `react.WithMessageFuture()` 捕获 Agent 过程中的每条产出消息流。`common/agent` 逐条消费 `MessageFuture.GetMessageStreams()` 返回的 `*schema.StreamReader[*schema.Message]`，原样向前端转发 `schema.Message` chunk，并在每条产出消息结束后用 `schema.ConcatMessages()` 聚合完整消息；如果底层未返回 `response_meta.finish_reason`，后端会补一个终止 chunk 以便前端稳定切分消息边界。`controller` 中的 `ChatHandler` 直接消费 service 事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。前端收到 `schema.Message` 后会分别累积 `reasoning_content` 和 `content`，并把工具调用/工具结果消息归入折叠的执行过程卡片。
+后端基于 Eino 的 `react.WithMessageFuture()` 捕获 Agent 过程中的每条产出消息流。`common/agent` 逐条消费 `MessageFuture.GetMessageStreams()` 返回的 `*schema.StreamReader[*schema.Message]`，原样向前端转发 `schema.Message` chunk，并在每条产出消息结束后用 `schema.ConcatMessages()` 聚合完整消息；如果底层未返回 `response_meta.finish_reason`，后端会补一个终止 chunk 以便前端稳定切分消息边界。`controller` 中的 `StreamHandler` 直接消费 service 事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。前端收到 `schema.Message` 后会分别累积 `reasoning_content` 和 `content`，并把工具调用/工具结果消息归入折叠的执行过程卡片。
 消息缓存和异步落库都会保留 `index`、`payload` 与 `tool_calls`，历史消息接口返回 `{index, message, created_at}`，其中 `message` 为完整 `schema.Message`，保证刷新回放和直播展示一致。
 
 ## 支持的 AI 模型

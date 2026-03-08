@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,29 +85,25 @@ func TestStreamLoopWritesSchemaMessagePayload(t *testing.T) {
 	}
 }
 
-func TestHandleStreamRequestReturnsErrorEventWhenMessageMissing(t *testing.T) {
+func TestStreamHandlerReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	recorder := newCloseNotifyRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/stream", nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/stream", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
 
-	events := resolveStreamSource(c.Request.Context(), &AgentRequest{Stream: true}, "alice")
-	event, ok := <-events
-	if !ok {
-		t.Fatal("expected error event")
+	StreamHandler(c)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"type":"error"`) {
+		t.Fatalf("expected error payload, got %q", body)
 	}
-	if event.Error == nil {
-		t.Fatal("expected error payload")
+	if !strings.Contains(body, `"message":"message is required"`) {
+		t.Fatalf("expected validation error message, got %q", body)
 	}
-	if event.Error.Type != agentService.StreamPayloadTypeError {
-		t.Fatalf("expected error type, got %q", event.Error.Type)
-	}
-	if event.Error.Message != "message is required" {
-		t.Fatalf("expected message validation error, got %q", event.Error.Message)
-	}
-	if _, ok := <-events; ok {
-		t.Fatal("expected channel to close after single error event")
+	if !strings.Contains(body, "data:[DONE]") {
+		t.Fatalf("expected done marker, got %q", body)
 	}
 }
 
@@ -130,5 +128,24 @@ func TestErrorEventStreamCanBeConsumedByGinStream(t *testing.T) {
 	}
 	if !strings.Contains(body, "data:[DONE]") {
 		t.Fatalf("expected done marker, got %q", body)
+	}
+}
+
+func TestGenerateHandlerReturnsJSONErrorWhenMessageMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/generate", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	GenerateHandler(c)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, fmt.Sprintf(`"code":%d`, code.CodeInvalidParams)) {
+		t.Fatalf("expected invalid params code, got %q", body)
+	}
+	if strings.Contains(body, `event:message`) {
+		t.Fatalf("expected JSON response, got SSE payload %q", body)
 	}
 }

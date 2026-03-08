@@ -50,8 +50,9 @@ export const SESSION_MENU_ITEMS = [
 
 // ==================== API 配置 ====================
 export const API_ENDPOINTS = {
-  // Agent 接口 - 统一的 RESTful 接口
-  AGENT: 'agent',                                      // POST: 发送消息
+  // Agent 接口
+  AGENT_GENERATE: 'agent/generate',                    // POST: 非流式生成
+  AGENT_STREAM: 'agent/stream',                        // POST: 流式生成
   AGENT_MESSAGES: (sessionId) => `agent/${sessionId}/messages`, // GET: 获取消息列表
 
   // 工具接口

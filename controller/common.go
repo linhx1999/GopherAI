@@ -3,9 +3,9 @@ package controller
 import "GopherAI/common/code"
 
 type Response struct {
-	Code code.Code      `json:"code"`
-	Msg  string         `json:"msg"`
-	Data []interface{} `json:"data,omitempty"`
+	Code code.Code   `json:"code"`
+	Msg  string      `json:"msg"`
+	Data interface{} `json:"data,omitempty"`
 }
 
 func (r *Response) CodeOf(code code.Code) Response {

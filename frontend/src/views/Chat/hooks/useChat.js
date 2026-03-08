@@ -218,18 +218,22 @@ const useChat = () => {
     }
   }, [isTempSession, sessions, loadSessions])
 
-  const sendStreamMessage = useCallback(async (question) => {
-    const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT}`
-    const body = {
+  const buildChatRequest = useCallback((question) => {
+    const payload = {
       message: question,
       tools: selectedTools,
       thinking_mode: thinkingMode,
-      stream: true
     }
 
     if (activeKey && !isTempSession) {
-      body.session_id = activeKey
+      payload.session_id = activeKey
     }
+    return payload
+  }, [selectedTools, thinkingMode, activeKey, isTempSession])
+
+  const sendStreamMessage = useCallback(async (question) => {
+    const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
+    const payload = buildChatRequest(question)
 
     let nextMessageIndex = null
     let activeMessageKey = null
@@ -286,7 +290,7 @@ const useChat = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(payload)
       })
 
       if (!response.ok) {
@@ -354,25 +358,15 @@ const useChat = () => {
       finalizeStream()
       message.error('流式传输出错: ' + err.message)
     }
-  }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, message])
+  }, [buildChatRequest, handleSessionCreated, message, thinkingMode])
 
-  const sendNormalMessage = useCallback(async (question) => {
-    const payload = {
-      message: question,
-      tools: selectedTools,
-      thinking_mode: thinkingMode,
-      stream: false
-    }
-
-    if (activeKey && !isTempSession) {
-      payload.session_id = activeKey
-    }
-
+  const sendGenerateMessage = useCallback(async (question) => {
+    const payload = buildChatRequest(question)
     try {
-      const response = await api.post(API_ENDPOINTS.AGENT, payload)
+      const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
 
       if (response.data?.code === STATUS_CODES.SUCCESS) {
-        const data = response.data.data?.[0] || {}
+        const data = response.data?.data || {}
         if (data.session_id) {
           handleSessionCreated(String(data.session_id))
           await loadMessages(String(data.session_id))
@@ -388,7 +382,7 @@ const useChat = () => {
     } finally {
       setIsLoading(false)
     }
-  }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, loadMessages, message])
+  }, [activeKey, buildChatRequest, handleSessionCreated, isTempSession, loadMessages, message])
 
   const handleAttachmentUpload = useCallback(async (file) => {
     const formData = new FormData()
@@ -457,11 +451,11 @@ const useChat = () => {
     if (isStreaming) {
       await sendStreamMessage(messageContent)
     } else {
-      await sendNormalMessage(messageContent)
+      await sendGenerateMessage(messageContent)
     }
 
     bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
-  }, [attachments, handleAttachmentUpload, isStreaming, message, messages.length, sendNormalMessage, sendStreamMessage])
+  }, [attachments, handleAttachmentUpload, isStreaming, message, messages.length, sendGenerateMessage, sendStreamMessage])
 
   const playTTS = useCallback(async (text) => {
     try {

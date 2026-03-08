@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,78 +16,67 @@ import (
 
 const ginSSEEventName = "message"
 
-// AgentRequest 统一请求结构
-type AgentRequest struct {
+// ChatRequest 表示生成类接口的共享请求体。
+type ChatRequest struct {
 	SessionID    string   `json:"session_id"`    // 可选，为空则创建新会话
 	Message      string   `json:"message"`       // 必填，用户消息内容
 	Tools        []string `json:"tools"`         // 可选，工具列表
 	ThinkingMode bool     `json:"thinking_mode"` // 可选，是否启用思考模型
-	Stream       bool     `json:"stream"`        // 是否流式响应，默认 true
 }
 
-// AgentHandler 统一 Agent 处理入口
-// POST /api/v1/agent
-func ChatHandler(c *gin.Context) {
-	req := new(AgentRequest)
-	userName := c.GetString("userName")
-
-	if err := c.ShouldBindJSON(req); err != nil {
-		c.JSON(http.StatusOK, controller.Response{
-			Code: code.CodeInvalidParams,
-			Msg:  "Invalid parameters",
-		})
+// GenerateHandler 处理非流式生成请求。
+// POST /api/v1/agent/generate
+func GenerateHandler(c *gin.Context) {
+	req, err := parseChatRequest(c)
+	if err != nil {
+		writeCodeResponse(c, code.CodeInvalidParams)
 		return
 	}
 
-	if req.Stream {
-		setSSEHeaders(c)
-		streamSSE(c, resolveStreamSource(c.Request.Context(), req, userName))
-		return
-	}
-
-	handleSyncRequest(c, req, userName)
-}
-
-func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
-	if req.Message == "" {
-		c.JSON(http.StatusOK, controller.Response{
-			Code: code.CodeInvalidParams,
-			Msg:  code.CodeInvalidParams.Msg(),
-		})
-		return
-	}
-
-	sessionID := req.SessionID
-	if sessionID == "" {
-		var code_ code.Code
-		sessionID, code_ = agentService.CreateSessionOnly(userName, req.Message)
-		if code_ != code.CodeSuccess {
-			c.JSON(http.StatusOK, controller.Response{
-				Code: code_,
-				Msg:  code_.Msg(),
-			})
-			return
-		}
-	}
-
-	result, code_ := agentService.GenerateWithContext(c.Request.Context(), userName, sessionID, req.Message, req.Tools, req.ThinkingMode)
+	result, code_ := agentService.Generate(c.Request.Context(), agentService.GenerateRequest{
+		UserName:     c.GetString("userName"),
+		SessionID:    req.SessionID,
+		UserMessage:  req.Message,
+		ToolNames:    req.Tools,
+		ThinkingMode: req.ThinkingMode,
+	})
 	if code_ != code.CodeSuccess {
-		c.JSON(http.StatusOK, controller.Response{
-			Code: code_,
-			Msg:  code_.Msg(),
-		})
+		writeCodeResponse(c, code_)
 		return
 	}
 
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
-		Data: []interface{}{gin.H{
-			"session_id":    sessionID,
-			"message_index": result.MessageIndex,
-			"message":       result.Message,
-		}},
+		Data: result,
 	})
+}
+
+// StreamHandler 处理 SSE 流式生成请求。
+// POST /api/v1/agent/stream
+func StreamHandler(c *gin.Context) {
+	req, err := parseChatRequest(c)
+	if err != nil {
+		setSSEHeaders(c)
+		streamSSE(c, errorEventStream(code.CodeInvalidParams, err.Error()))
+		return
+	}
+
+	stream, code_ := agentService.Stream(c.Request.Context(), agentService.GenerateRequest{
+		UserName:     c.GetString("userName"),
+		SessionID:    req.SessionID,
+		UserMessage:  req.Message,
+		ToolNames:    req.Tools,
+		ThinkingMode: req.ThinkingMode,
+	})
+	if code_ != code.CodeSuccess {
+		setSSEHeaders(c)
+		streamSSE(c, errorEventStream(code_, ""))
+		return
+	}
+
+	setSSEHeaders(c)
+	streamSSE(c, stream.Events)
 }
 
 // GetMessages 获取消息列表
@@ -108,11 +97,11 @@ func GetMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
-		Data: []interface{}{gin.H{
+		Data: gin.H{
 			"session_id": sessionID,
 			"messages":   messages,
 			"total":      len(messages),
-		}},
+		},
 	})
 }
 
@@ -125,7 +114,25 @@ func GetTools(c *gin.Context) {
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
-		Data: []interface{}{gin.H{"tools": toolList}},
+		Data: gin.H{"tools": toolList},
+	})
+}
+
+func parseChatRequest(c *gin.Context) (*ChatRequest, error) {
+	req := new(ChatRequest)
+	if err := c.ShouldBindJSON(req); err != nil {
+		return nil, errors.New("invalid parameters")
+	}
+	if req.Message == "" {
+		return nil, errors.New("message is required")
+	}
+	return req, nil
+}
+
+func writeCodeResponse(c *gin.Context, code_ code.Code) {
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code_,
+		Msg:  code_.Msg(),
 	})
 }
 
@@ -165,18 +172,6 @@ func oneShotSSEStream(event agentService.StreamEvent) <-chan agentService.Stream
 	events <- event
 	close(events)
 	return events
-}
-
-func resolveStreamSource(ctx context.Context, req *AgentRequest, userName string) <-chan agentService.StreamEvent {
-	if req.Message == "" {
-		return errorEventStream(code.CodeInvalidParams, "message is required")
-	}
-
-	handle, code_ := agentService.OpenStreamWithMeta(ctx, userName, req.SessionID, req.Message, req.Tools, req.ThinkingMode)
-	if code_ != code.CodeSuccess {
-		return errorEventStream(code_, "")
-	}
-	return handle.Events
 }
 
 func errorEventStream(code_ code.Code, message string) <-chan agentService.StreamEvent {
