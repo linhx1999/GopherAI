@@ -96,6 +96,11 @@ export const MESSAGE_ROLES = {
   SYSTEM: 'system',
 }
 
+export const ASSISTANT_DISPLAY_MODES = {
+  DEFAULT: 'default',
+  TOOL_CHAIN: 'tool_chain',
+}
+
 // ==================== 特殊会话 ID ====================
 export const SPECIAL_SESSIONS = {
   TEMP: 'temp',

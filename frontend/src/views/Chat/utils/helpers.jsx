@@ -1,7 +1,12 @@
 import { Avatar, Typography } from 'antd'
 import { CopyOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import XMarkdown from '@ant-design/x-markdown'
-import { COLORS, MESSAGE_MAX_WIDTH } from '../config/constants'
+import {
+  ASSISTANT_DISPLAY_MODES,
+  COLORS,
+  MESSAGE_MAX_WIDTH,
+  TOOL_OPTIONS
+} from '../config/constants'
 
 const { Text } = Typography
 
@@ -23,6 +28,11 @@ export const createMessageActions = (isUser) => {
 
 // Markdown 渲染
 export const renderMarkdown = (content) => <XMarkdown content={content} />
+
+const TOOL_LABELS = TOOL_OPTIONS.reduce((labels, option) => {
+  labels[option.value] = option.label
+  return labels
+}, {})
 
 // Role 配置
 export const createRoleConfig = () => ({
@@ -102,11 +112,135 @@ export const formatToolArguments = (argumentsText) => {
   }
 }
 
+const normalizeToolNames = (toolNames) => (
+  Array.isArray(toolNames)
+    ? toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean)
+    : []
+)
+
+export const getToolLabel = (toolName) => TOOL_LABELS[toolName] || toolName || '工具'
+
 const isProcessMessage = (message = {}) => {
   if (message.role === 'tool') return true
   if (message.role !== 'assistant') return false
   const hasVisibleAnswer = Boolean(message.content || message.reasoning_content)
   return !hasVisibleAnswer && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
+}
+
+export const hasToolExecution = (processRecords = []) => processRecords.some((record) => {
+  const message = record.message || {}
+  return message.role === 'tool' || (Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
+})
+
+export const shouldUseToolChain = (record, processRecords = []) => {
+  if (!record || record.message?.role !== 'assistant') {
+    return false
+  }
+
+  if (record.displayMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
+    return true
+  }
+
+  return hasToolExecution(processRecords)
+}
+
+const buildPlanningItem = ({ record, hasExecution }) => {
+  if (!record?.displayMode && !hasExecution) {
+    return null
+  }
+
+  const selectedToolNames = normalizeToolNames(record?.selectedToolNames)
+  const isPending = Boolean(record?.pending) && !hasExecution
+  const description = selectedToolNames.length > 0
+    ? `已启用：${selectedToolNames.map(getToolLabel).join('、')}`
+    : (hasExecution ? '已进入工具执行链路' : '工具规划中')
+
+  return {
+    key: `${record?.key || 'tool-chain'}-plan`,
+    title: '工具规划',
+    description,
+    status: isPending ? 'loading' : 'success',
+    blink: isPending
+  }
+}
+
+const buildToolCallItems = (processRecords = []) => processRecords.flatMap((record) => {
+  const message = record.message || {}
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+
+  return toolCalls.map((call, index) => {
+    const toolName = call.function?.name || call.id || `tool-${index + 1}`
+    const formattedArguments = formatToolArguments(call.function?.arguments)
+
+    return {
+      key: `${record.key}-call-${call.id || call.index || index}`,
+      title: `调用 ${getToolLabel(toolName)}`,
+      description: formattedArguments ? '参数已准备' : '等待工具执行',
+      content: formattedArguments ? (
+        <pre className="thought-chain-code-block">{formattedArguments}</pre>
+      ) : null,
+      collapsible: Boolean(formattedArguments),
+      status: record.pending ? 'loading' : 'success',
+      blink: Boolean(record.pending)
+    }
+  })
+})
+
+const buildToolResultItems = (processRecords = []) => processRecords.flatMap((record, index) => {
+  const message = record.message || {}
+  if (message.role !== 'tool') {
+    return []
+  }
+
+  const toolName = message.tool_name || message.name || `tool-result-${index + 1}`
+  const content = message.content || ''
+
+  return [{
+    key: `${record.key}-result`,
+    title: `${getToolLabel(toolName)} 执行结果`,
+    description: content ? '工具返回了可展示内容' : '工具已完成执行',
+    content: content ? (
+      <div className="thought-chain-markdown">
+        {renderMarkdown(content)}
+      </div>
+    ) : null,
+    collapsible: Boolean(content),
+    status: record.pending ? 'loading' : 'success',
+    blink: Boolean(record.pending)
+  }]
+})
+
+const buildAnswerItem = ({ record, hasExecution }) => {
+  if (!record) {
+    return null
+  }
+
+  const message = record.message || {}
+  const hasAnswer = Boolean((message.content || '').trim())
+  const isPending = Boolean(record.pending) && !hasAnswer
+
+  return {
+    key: `${record.key}-answer`,
+    title: hasExecution ? '整理最终回答' : '直接生成回答',
+    description: hasAnswer ? '已生成最终回答' : (isPending ? '正在生成最终回答' : '当前轮次未返回正文'),
+    status: isPending ? 'loading' : 'success',
+    blink: isPending
+  }
+}
+
+export const buildThoughtChainItems = ({ record = null, processRecords = [] }) => {
+  const hasExecution = hasToolExecution(processRecords)
+  const planningItem = buildPlanningItem({ record, hasExecution })
+  const toolCallItems = buildToolCallItems(processRecords)
+  const toolResultItems = buildToolResultItems(processRecords)
+  const answerItem = buildAnswerItem({ record, hasExecution })
+
+  return [
+    planningItem,
+    ...toolCallItems,
+    ...toolResultItems,
+    answerItem
+  ].filter(Boolean)
 }
 
 export const buildDisplayMessages = (records) => {

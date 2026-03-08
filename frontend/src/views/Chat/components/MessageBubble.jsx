@@ -1,62 +1,28 @@
-import { Avatar, Collapse, Tag, Typography } from 'antd'
-import { RobotOutlined, ToolOutlined } from '@ant-design/icons'
-import { Bubble, Actions, Think } from '@ant-design/x'
+import { Avatar, Typography } from 'antd'
+import { RobotOutlined } from '@ant-design/icons'
+import { Actions, Bubble, Think, ThoughtChain } from '@ant-design/x'
 import useStreamContent from '../hooks/useStreamContent'
 import { COLORS, MESSAGE_MAX_WIDTH } from '../config/constants'
-import { createMessageActions, formatToolArguments, renderMarkdown } from '../utils/helpers.jsx'
+import {
+  buildThoughtChainItems,
+  createMessageActions,
+  renderMarkdown,
+  shouldUseToolChain
+} from '../utils/helpers.jsx'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
-const ProcessCard = ({ processes = [] }) => {
-  if (!processes.length) return null
-
-  const items = processes.map((record) => {
-    const message = record.message || {}
-    const toolCalls = message.tool_calls || []
-    const isToolMessage = message.role === 'tool'
-    const toolTitle = isToolMessage ? (message.tool_name || '工具结果') : '工具调用'
-
-    return {
-      key: record.key,
-      label: (
-        <span className="process-item-title">
-          <ToolOutlined />
-          <span>{toolTitle}</span>
-          {record.pending ? <Tag color="processing">执行中</Tag> : null}
-        </span>
-      ),
-      children: (
-        <div className="process-item-body">
-          {toolCalls.map((call, index) => (
-            <div key={`${record.key}-tool-${index}`} className="process-tool-call">
-              <Text strong>{call.function?.name || call.id || 'tool'}</Text>
-              <pre>{formatToolArguments(call.function?.arguments)}</pre>
-            </div>
-          ))}
-          {message.content ? (
-            <div className="process-tool-result">
-              {renderMarkdown(message.content)}
-            </div>
-          ) : null}
-          {!message.content && toolCalls.length === 0 ? (
-            <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              暂无可展示内容
-            </Paragraph>
-          ) : null}
-        </div>
-      )
-    }
-  })
+const ToolThoughtChain = ({ record = null, processes = [] }) => {
+  const items = buildThoughtChainItems({ record, processRecords: processes })
+  if (!items.length) {
+    return null
+  }
 
   return (
-    <Collapse
-      className="assistant-process-card"
-      defaultActiveKey={[]}
-      items={[{
-        key: 'processes',
-        label: `执行过程 (${processes.length})`,
-        children: <Collapse ghost items={items} />
-      }]}
+    <ThoughtChain
+      className="assistant-thought-chain"
+      items={items}
+      line="dashed"
     />
   )
 }
@@ -64,9 +30,10 @@ const ProcessCard = ({ processes = [] }) => {
 const AssistantBubble = ({ record, processes, onActionClick }) => {
   const message = record.message || {}
   const shouldAnimate = record.renderMode === 'stream' && record.pending
+  const useToolChain = shouldUseToolChain(record, processes)
   const rawReasoningContent = message.reasoning_content || ''
   const rawAnswerContent = message.content || ''
-  const [streamContent, isContentDone] = useStreamContent(message.content || '', {
+  const [streamContent, isContentDone] = useStreamContent(rawAnswerContent, {
     step: 3,
     interval: 30,
     enabled: shouldAnimate
@@ -80,13 +47,13 @@ const AssistantBubble = ({ record, processes, onActionClick }) => {
   const answerDisplayContent = shouldAnimate && !isContentDone ? streamContent : rawAnswerContent
   const isStreaming = shouldAnimate && !isContentDone
   const showReasoningPlaceholder = Boolean(record.expectReasoning) && shouldAnimate && !rawReasoningContent.trim() && !rawAnswerContent.trim()
-  const showReasoning = Boolean(rawReasoningContent) || showReasoningPlaceholder
+  const showReasoning = !useToolChain && (Boolean(rawReasoningContent) || showReasoningPlaceholder)
   const showAnswer = Boolean(rawAnswerContent)
   const reasoningLoading = showReasoning && shouldAnimate && !rawAnswerContent.trim()
 
   return (
     <div className="assistant-message">
-      <ProcessCard processes={processes} />
+      {useToolChain ? <ToolThoughtChain record={record} processes={processes} /> : null}
 
       {showReasoning ? (
         <Think
@@ -127,4 +94,4 @@ const AssistantBubble = ({ record, processes, onActionClick }) => {
 }
 
 export default AssistantBubble
-export { ProcessCard }
+export { ToolThoughtChain }

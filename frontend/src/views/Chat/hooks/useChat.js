@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { App } from 'antd'
 import api, { API_BASE_URL } from '../../../utils/api'
 import {
+  ASSISTANT_DISPLAY_MODES,
   MESSAGE_PAGE_SIZE,
   STATUS_CODES,
   API_ENDPOINTS,
@@ -60,7 +61,9 @@ const createRecord = ({
   pending = false,
   createdAt = null,
   renderMode = MESSAGE_RENDER_MODE.INSTANT,
-  expectReasoning = false
+  expectReasoning = false,
+  displayMode = ASSISTANT_DISPLAY_MODES.DEFAULT,
+  selectedToolNames = []
 }) => ({
   key,
   index,
@@ -68,7 +71,9 @@ const createRecord = ({
   pending,
   createdAt,
   renderMode,
-  expectReasoning
+  expectReasoning,
+  displayMode,
+  selectedToolNames
 })
 
 const useChat = () => {
@@ -258,22 +263,28 @@ const useChat = () => {
     }
   }, [isTempSession, sessions, loadSessions])
 
-  const buildChatRequest = useCallback((question) => {
+  const createRequestOptions = useCallback(() => ({
+    selectedToolNames: [...selectedTools],
+    thinkingModeEnabled: thinkingMode
+  }), [selectedTools, thinkingMode])
+
+  const buildChatRequest = useCallback((question, requestOptions) => {
     const payload = {
       message: question,
-      tools: selectedTools,
-      thinking_mode: thinkingMode,
+      tools: requestOptions.selectedToolNames,
+      thinking_mode: requestOptions.thinkingModeEnabled,
     }
 
     if (activeKey && !isTempSession) {
       payload.session_id = activeKey
     }
     return payload
-  }, [selectedTools, thinkingMode, activeKey, isTempSession])
+  }, [activeKey, isTempSession])
 
-  const sendStreamMessage = useCallback(async (question) => {
+  const sendStreamMessage = useCallback(async (question, requestOptions) => {
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
-    const payload = buildChatRequest(question)
+    const payload = buildChatRequest(question, requestOptions)
+    const hasSelectedTools = requestOptions.selectedToolNames.length > 0
 
     let nextMessageIndex = null
     let activeMessageKey = null
@@ -295,7 +306,9 @@ const useChat = () => {
         message: mergeSchemaMessageChunk({}, chunk),
         pending: !isMessageFinished(chunk),
         renderMode: MESSAGE_RENDER_MODE.STREAM,
-        expectReasoning: thinkingMode && chunk.role === MESSAGE_ROLES.ASSISTANT
+        expectReasoning: requestOptions.thinkingModeEnabled && chunk.role === MESSAGE_ROLES.ASSISTANT,
+        displayMode: hasSelectedTools ? ASSISTANT_DISPLAY_MODES.TOOL_CHAIN : ASSISTANT_DISPLAY_MODES.DEFAULT,
+        selectedToolNames: requestOptions.selectedToolNames
       })
       if (nextMessageIndex !== null) {
         nextMessageIndex += 1
@@ -398,10 +411,10 @@ const useChat = () => {
       finalizeStream()
       message.error('流式传输出错: ' + err.message)
     }
-  }, [buildChatRequest, handleSessionCreated, message, thinkingMode])
+  }, [buildChatRequest, handleSessionCreated, message])
 
-  const sendGenerateMessage = useCallback(async (question) => {
-    const payload = buildChatRequest(question)
+  const sendGenerateMessage = useCallback(async (question, requestOptions) => {
+    const payload = buildChatRequest(question, requestOptions)
     try {
       const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
 
@@ -488,14 +501,16 @@ const useChat = () => {
       return prevPage !== page ? page : prevPage
     })
 
+    const requestOptions = createRequestOptions()
+
     if (isStreaming) {
-      await sendStreamMessage(messageContent)
+      await sendStreamMessage(messageContent, requestOptions)
     } else {
-      await sendGenerateMessage(messageContent)
+      await sendGenerateMessage(messageContent, requestOptions)
     }
 
     bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
-  }, [attachments, handleAttachmentUpload, isStreaming, message, messages.length, sendGenerateMessage, sendStreamMessage])
+  }, [attachments, createRequestOptions, handleAttachmentUpload, isStreaming, message, messages.length, sendGenerateMessage, sendStreamMessage])
 
   const playTTS = useCallback(async (text) => {
     try {

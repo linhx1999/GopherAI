@@ -6,7 +6,7 @@
 
 - **多模型 AI 对话** - 支持 OpenAI 兼容模型、Ollama 本地模型、阿里云 RAG 模型
 - **流式响应** - 支持 SSE 流式输出，实时展示 AI 回复；历史消息回放时直接完整展示，不再逐字重放
-- **思考模式** - 支持在聊天页切换普通模型与思考模型，并在模型返回推理内容时展示思考过程；实时思考回复会在最终回答输出前保持 loading，占位期间和推理输出阶段都可见
+- **思考模式** - 支持在聊天页切换普通模型与思考模型；未启用工具时，模型返回推理内容会用 `Think` 展示思考过程；启用工具后则改为 `ThoughtChain` 展示工具链路，避免把工具执行和自由推理混在一起
 - **RAG 知识库** - 上传文档构建知识库，基于向量检索增强生成
   - 支持文档切分（Markdown 标题切分、文本固定长度切分）
   - 支持指定文件进行 RAG 对话
@@ -227,9 +227,10 @@ GopherAI/
 
 - 关闭时，请求使用 `OPENAI_MODEL_NAME`
 - 打开时，请求使用 `OPENAI_REASONING_MODEL_NAME`
-- 如果模型在响应中返回推理内容，前端会用 `Think` 组件实时展示思考过程
-- 开启思考模式的实时回复会先显示 `Think` loading 占位，并在最终回答正文开始输出前保持 loading；历史消息则直接展示完整内容
-- 如果模型未返回推理内容，则只展示最终回答
+- 如果当前轮次未启用工具，且模型在响应中返回推理内容，前端会用 `Think` 组件实时展示思考过程
+- 如果当前轮次启用了工具，前端会改用 `ThoughtChain` 展示“工具规划 -> 工具调用 -> 工具结果 -> 最终回答”的链路，不再同时展示 `Think`
+- 开启思考模式的实时回复会先显示对应的 loading 占位；历史消息则直接展示完整内容
+- 如果模型未返回推理内容且未进入工具链路，则只展示最终回答
 
 ### Agent Generate 请求示例
 
@@ -283,7 +284,7 @@ data: {"role":"assistant","content":"答案","response_meta":{"finish_reason":"s
 data: {"role":"tool","tool_name":"knowledge_search","content":"...","response_meta":{"finish_reason":"stop"}}
 ```
 
-后端基于 Eino 的 `react.WithMessageFuture()` 捕获 Agent 过程中的每条产出消息流。`common/agent` 逐条消费 `MessageFuture.GetMessageStreams()` 返回的 `*schema.StreamReader[*schema.Message]`，原样向前端转发 `schema.Message` chunk，并在每条产出消息结束后用 `schema.ConcatMessages()` 聚合完整消息；如果底层未返回 `response_meta.finish_reason`，后端会补一个终止 chunk 以便前端稳定切分消息边界。`controller` 中的 `StreamHandler` 直接消费 service 事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。前端收到 `schema.Message` 后会分别累积 `reasoning_content` 和 `content`，并把工具调用/工具结果消息归入折叠的执行过程卡片。
+后端基于 Eino 的 `react.WithMessageFuture()` 捕获 Agent 过程中的每条产出消息流。`common/agent` 逐条消费 `MessageFuture.GetMessageStreams()` 返回的 `*schema.StreamReader[*schema.Message]`，原样向前端转发 `schema.Message` chunk，并在每条产出消息结束后用 `schema.ConcatMessages()` 聚合完整消息；如果底层未返回 `response_meta.finish_reason`，后端会补一个终止 chunk 以便前端稳定切分消息边界。`controller` 中的 `StreamHandler` 直接消费 service 事件流并通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时追加 `data: [DONE]` 结束标记，请求断连会通过 `request.Context()` 向上游传播取消信号。前端收到 `schema.Message` 后会分别累积 `reasoning_content` 和 `content`；当本轮启用了工具时，会把 `assistant(tool_calls)` 和 `tool` 消息重建成 `ThoughtChain` 链路视图，历史回放和实时流式保持同一展示结构。
 消息缓存和异步落库都会保留 `index`、`payload` 与 `tool_calls`，历史消息接口返回 `{index, message, created_at}`，其中 `message` 为完整 `schema.Message`，保证刷新回放和直播展示一致。
 
 ### 历史消息接口示例

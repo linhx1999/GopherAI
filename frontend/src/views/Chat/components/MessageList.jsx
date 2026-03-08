@@ -1,6 +1,6 @@
 import { Pagination } from 'antd'
 import { Welcome, Bubble, Actions } from '@ant-design/x'
-import AssistantBubble, { ProcessCard } from './MessageBubble'
+import AssistantBubble, { ToolThoughtChain } from './MessageBubble'
 import { MESSAGE_PAGE_SIZE, MESSAGE_ROLES } from '../config/constants'
 import { buildDisplayMessages, createMessageActions } from '../utils/helpers.jsx'
 
@@ -43,7 +43,7 @@ const MessageList = ({
             }
 
             if (item.type === 'process') {
-              return <ProcessCard key={item.key} processes={item.processes} />
+              return <ToolThoughtChain key={item.key} processes={item.processes} />
             }
 
             const record = item.record
