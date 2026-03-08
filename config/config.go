@@ -63,9 +63,10 @@ type VoiceServiceConfig struct {
 }
 
 type OpenAIConfig struct {
-	ApiKey    string
-	ModelName string
-	BaseUrl   string
+	ApiKey             string
+	ModelName          string
+	ReasoningModelName string
+	BaseUrl            string
 }
 
 type MinioConfig struct {
@@ -90,15 +91,15 @@ type Config struct {
 }
 
 type RedisKeyConfig struct {
-	CaptchaPrefix    string
-	MessagePrefix    string // 消息历史缓存 key 前缀
-	MessageTTL       int    // 消息缓存过期时间（小时）
+	CaptchaPrefix string
+	MessagePrefix string // 消息历史缓存 key 前缀
+	MessageTTL    int    // 消息缓存过期时间（小时）
 }
 
 var DefaultRedisKeyConfig = RedisKeyConfig{
 	CaptchaPrefix: "captcha:%s",
 	MessagePrefix: "chat:messages:%s", // chat:messages:{sessionID}
-	MessageTTL:    2,                   // 2小时过期
+	MessageTTL:    2,                  // 2小时过期
 }
 
 var config *Config
@@ -176,9 +177,10 @@ func InitConfig() error {
 			VoiceServiceSecretKey: getEnv("VOICE_SECRET_KEY", ""),
 		},
 		OpenAIConfig: OpenAIConfig{
-			ApiKey:    getEnv("OPENAI_API_KEY", ""),
-			ModelName: getEnv("OPENAI_MODEL_NAME", ""),
-			BaseUrl:   getEnv("OPENAI_BASE_URL", ""),
+			ApiKey:             getEnv("OPENAI_API_KEY", ""),
+			ModelName:          getEnv("OPENAI_MODEL_NAME", ""),
+			ReasoningModelName: getEnv("OPENAI_REASONING_MODEL_NAME", ""),
+			BaseUrl:            getEnv("OPENAI_BASE_URL", ""),
 		},
 		MinioConfig: MinioConfig{
 			Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),

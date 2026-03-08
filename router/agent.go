@@ -16,7 +16,7 @@ func SetupAgentRoutes(r *gin.RouterGroup) {
 	agent.Use(jwt.Auth())
 	{
 		// POST /api/v1/agent - 发送消息/重新生成（支持流式/非流式）
-		agent.POST("", agentController.AgentHandler)
+		agent.POST("", agentController.ChatHandler)
 
 		// GET /api/v1/agent/:session_id/messages - 获取消息列表
 		agent.GET("/:session_id/messages", agentController.GetMessages)

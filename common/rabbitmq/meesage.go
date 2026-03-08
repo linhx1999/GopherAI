@@ -9,21 +9,39 @@ import (
 )
 
 type MessageMQParam struct {
-	SessionID string `json:"session_id"`
-	Content   string `json:"content"`
-	UserName  string `json:"user_name"`
-	Role      string `json:"role"` // user/assistant
+	SessionID string          `json:"session_id"`
+	Content   string          `json:"content"`
+	UserName  string          `json:"user_name"`
+	Role      string          `json:"role"` // user/assistant
+	Index     *int            `json:"index,omitempty"`
+	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
 }
 
-func GenerateMessageMQParam(sessionID string, content string, userName string, role string) []byte {
+func GenerateMessageMQParam(msg *model.Message) ([]byte, error) {
 	param := MessageMQParam{
-		SessionID: sessionID,
-		Content:   content,
-		UserName:  userName,
-		Role:      role,
+		SessionID: msg.SessionID,
+		Content:   msg.Content,
+		UserName:  msg.UserName,
+		Role:      msg.Role,
+		ToolCalls: msg.ToolCalls,
 	}
-	data, _ := json.Marshal(param)
-	return data
+	param.Index = &msg.Index
+	return json.Marshal(param)
+}
+
+func buildMessageFromParam(param MessageMQParam) (*model.Message, bool) {
+	newMsg := &model.Message{
+		SessionID: param.SessionID,
+		Content:   param.Content,
+		UserName:  param.UserName,
+		Role:      param.Role,
+		ToolCalls: param.ToolCalls,
+	}
+	if param.Index == nil {
+		return newMsg, false
+	}
+	newMsg.Index = *param.Index
+	return newMsg, true
 }
 
 func MQMessage(msg *amqp.Delivery) error {
@@ -32,13 +50,12 @@ func MQMessage(msg *amqp.Delivery) error {
 	if err != nil {
 		return err
 	}
-	newMsg := &model.Message{
-		SessionID: param.SessionID,
-		Content:   param.Content,
-		UserName:  param.UserName,
-		Role:      param.Role,
+
+	newMsg, hasIndex := buildMessageFromParam(param)
+	if hasIndex {
+		_, err = message.CreateMessage(newMsg)
+		return err
 	}
-	//消费者异步插入到数据库中
-	message.CreateMessage(newMsg)
-	return nil
+
+	return message.CreateMessageWithIndex(newMsg)
 }

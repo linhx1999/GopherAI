@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"GopherAI/common/agent"
+	agentcommon "GopherAI/common/agent"
 	"GopherAI/common/code"
 	"GopherAI/common/rabbitmq"
 	redis_cache "GopherAI/common/redis"
@@ -34,73 +34,149 @@ const SystemPrompt = `你是一个智能助手，可以帮助用户解答各种�
 const (
 	SSEEventTypeMeta         = "meta"
 	SSEEventTypeToolCall     = "tool_call"
+	SSEEventTypeReasoning    = "reasoning_delta"
+	SSEEventTypeReasoningEnd = "reasoning_end"
 	SSEEventTypeContentDelta = "content_delta"
 	SSEEventTypeMessageEnd   = "message_end"
+	SSEEventTypeError        = "error"
 )
 
-// MetaEvent 元信息事件
-type MetaEvent struct {
-	SessionID    string `json:"session_id"`
-	MessageIndex int    `json:"message_index"`
+// SSEEvent 统一的 SSE 载荷结构。
+type SSEEvent struct {
+	Type         string          `json:"type"`
+	SessionID    string          `json:"session_id,omitempty"`
+	MessageIndex int             `json:"message_index,omitempty"`
+	ToolID       string          `json:"tool_id,omitempty"`
+	Function     string          `json:"function,omitempty"`
+	Arguments    json.RawMessage `json:"arguments,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	Status       string          `json:"status,omitempty"`
+	Message      string          `json:"message,omitempty"`
 }
 
-// ToolCallEvent 工具调用事件
-type ToolCallEvent struct {
-	ToolID    string          `json:"tool_id"`
-	Function  string          `json:"function"`
-	Arguments json.RawMessage `json:"arguments"`
-}
-
-// ContentDeltaEvent 内容增量事件
-type ContentDeltaEvent struct {
-	Content string `json:"content"`
-}
-
-// MessageEndEvent 消息结束事件
-type MessageEndEvent struct {
-	Status string `json:"status"` // "completed" | "error"
+// StreamHandle 表示一个可被 controller 消费的事件流。
+type StreamHandle struct {
+	SessionID string
+	Events    <-chan SSEEvent
 }
 
 // AgentResult Agent 执行结果
 type AgentResult struct {
-	SessionID    string           `json:"session_id"`
-	MessageIndex int              `json:"message_index"`
-	Role         string           `json:"role"`
-	Content      string           `json:"content"`
-	ToolCalls    []model.ToolCall `json:"tool_calls,omitempty"`
+	SessionID        string           `json:"session_id"`
+	MessageIndex     int              `json:"message_index"`
+	Role             string           `json:"role"`
+	Content          string           `json:"content"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []model.ToolCall `json:"tool_calls,omitempty"`
 }
 
-// saveMessageToDB 异步保存消息到数据库（通过 RabbitMQ）
-func saveMessageToDB(sessionID string, content string, userName string, role string, toolCalls []model.ToolCall) {
-	data := rabbitmq.GenerateMessageMQParam(sessionID, content, userName, role)
-	if err := rabbitmq.RMQMessage.Publish(data); err != nil {
-		log.Printf("saveMessageToDB error: %v", err)
+// NewErrorEvent 创建错误事件。
+func NewErrorEvent(message string) SSEEvent {
+	return SSEEvent{
+		Type:    SSEEventTypeError,
+		Message: message,
 	}
 }
 
-// saveMessageToDBNew 异步保存消息到数据库（新格式）
-func saveMessageToDBNew(msg *model.Message) {
-	data := rabbitmq.GenerateMessageMQParam(msg.SessionID, msg.Content, msg.UserName, msg.Role)
+// publishMessageToDB 异步保存消息到数据库（通过 RabbitMQ）。
+func publishMessageToDB(msg *model.Message) {
+	data, err := rabbitmq.GenerateMessageMQParam(msg)
+	if err != nil {
+		log.Printf("publishMessageToDB marshal error: %v", err)
+		return
+	}
 	if err := rabbitmq.RMQMessage.Publish(data); err != nil {
-		log.Printf("saveMessageToDBNew error: %v", err)
+		log.Printf("publishMessageToDB publish error: %v", err)
 	}
 }
 
 // appendMessageToRedis 追加消息到 Redis 缓存
-func appendMessageToRedis(sessionID string, content string, role string, index int) error {
-	msg := &model.Message{
+func appendMessageToRedis(msg *model.Message) error {
+	return redis_cache.AppendMessage(msg.SessionID, msg)
+}
+
+func buildUserMessage(sessionID string, userName string, index int, content string) *model.Message {
+	return &model.Message{
 		SessionID: sessionID,
-		Content:   content,
-		Role:      role,
+		UserName:  userName,
 		Index:     index,
+		Role:      "user",
+		Content:   content,
 		CreatedAt: time.Now(),
 	}
-	return redis_cache.AppendMessage(sessionID, msg)
+}
+
+func buildAssistantMessage(sessionID string, userName string, index int, result *agentcommon.StreamResult) *model.Message {
+	msg := &model.Message{
+		SessionID: sessionID,
+		UserName:  userName,
+		Index:     index,
+		Role:      "assistant",
+		Content:   result.Content,
+		CreatedAt: time.Now(),
+	}
+	if len(result.ToolCalls) > 0 {
+		if err := msg.SetToolCalls(result.ToolCalls); err != nil {
+			log.Printf("buildAssistantMessage set tool calls failed: %v", err)
+		}
+	}
+	return msg
+}
+
+func buildAgentResult(sessionID string, messageIndex int, result *agentcommon.StreamResult) *AgentResult {
+	return &AgentResult{
+		SessionID:        sessionID,
+		MessageIndex:     messageIndex,
+		Role:             "assistant",
+		Content:          result.Content,
+		ReasoningContent: result.ReasoningContent,
+		ToolCalls:        result.ToolCalls,
+	}
+}
+
+func emitEvent(ctx context.Context, events chan<- SSEEvent, event SSEEvent) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case events <- event:
+		return nil
+	}
+}
+
+func translateStreamEvent(event agentcommon.StreamEvent) SSEEvent {
+	switch event.Type {
+	case agentcommon.StreamEventTypeToolCall:
+		if event.ToolCall == nil {
+			return SSEEvent{}
+		}
+		return SSEEvent{
+			Type:      SSEEventTypeToolCall,
+			ToolID:    event.ToolCall.ToolID,
+			Function:  event.ToolCall.Function,
+			Arguments: event.ToolCall.Arguments,
+		}
+	case agentcommon.StreamEventTypeReasoningDelta:
+		return SSEEvent{
+			Type:    SSEEventTypeReasoning,
+			Content: event.Content,
+		}
+	case agentcommon.StreamEventTypeReasoningEnd:
+		return SSEEvent{
+			Type:   SSEEventTypeReasoningEnd,
+			Status: "completed",
+		}
+	case agentcommon.StreamEventTypeContentDelta:
+		return SSEEvent{
+			Type:    SSEEventTypeContentDelta,
+			Content: event.Content,
+		}
+	default:
+		return SSEEvent{}
+	}
 }
 
 // getMessagesFromRedis 从 Redis 获取消息历史（Cache-Aside 模式）
 func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
-	// 1. 先从 Redis 获取
 	messages, err := redis_cache.GetMessages(sessionID)
 	if err != nil {
 		log.Printf("getMessagesFromRedis redis error: %v", err)
@@ -108,20 +184,17 @@ func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 		return messages, nil
 	}
 
-	// 2. Redis miss 或出错，从 PostgreSQL 加载
 	dbMessages, err := message.GetMessagesBySessionIDOrdered(sessionID)
 	if err != nil {
 		log.Printf("getMessagesFromRedis db error: %v", err)
 		return nil, err
 	}
 
-	// 3. 转换为指针数组
 	result := make([]*model.Message, 0, len(dbMessages))
 	for i := range dbMessages {
 		result = append(result, &dbMessages[i])
 	}
 
-	// 4. 写入 Redis 缓存（异步）
 	if len(result) > 0 {
 		go func() {
 			if err := redis_cache.CacheMessages(sessionID, result); err != nil {
@@ -136,14 +209,11 @@ func getMessagesFromRedis(sessionID string) ([]*model.Message, error) {
 // buildMessages 构建发送给 Agent 的消息列表
 func buildMessages(history []*model.Message, userContent string) []*schema.Message {
 	messages := make([]*schema.Message, 0, len(history)+2)
-
-	// 添加系统提示词
 	messages = append(messages, &schema.Message{
 		Role:    schema.System,
 		Content: SystemPrompt,
 	})
 
-	// 添加历史消息
 	for _, m := range history {
 		role := schema.Assistant
 		if m.Role == "user" {
@@ -155,7 +225,6 @@ func buildMessages(history []*model.Message, userContent string) []*schema.Messa
 		})
 	}
 
-	// 添加当前用户内容
 	if userContent != "" {
 		messages = append(messages, &schema.Message{
 			Role:    schema.User,
@@ -164,46 +233,6 @@ func buildMessages(history []*model.Message, userContent string) []*schema.Messa
 	}
 
 	return messages
-}
-
-// sendSSEEvent 发送 SSE 事件
-func sendSSEEvent(writer http.ResponseWriter, eventType string, payload interface{}) error {
-	// 序列化 payload
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	// 转换为 map 并添加 type 字段
-	var eventMap map[string]interface{}
-	if err := json.Unmarshal(data, &eventMap); err != nil {
-		return err
-	}
-	eventMap["type"] = eventType
-
-	// 序列化并发送
-	eventData, err := json.Marshal(eventMap)
-	if err != nil {
-		return err
-	}
-
-	_, err = writer.Write([]byte("data: " + string(eventData) + "\n\n"))
-	if err != nil {
-		return err
-	}
-
-	if flusher, ok := writer.(http.Flusher); ok {
-		flusher.Flush()
-	}
-
-	return nil
-}
-
-// sendSSEError 发送 SSE 错误事件
-func sendSSEError(writer http.ResponseWriter, code_ code.Code) {
-	sendSSEEvent(writer, SSEEventTypeMessageEnd, MessageEndEvent{
-		Status: "error",
-	})
 }
 
 // CreateSessionOnly 仅创建会话（用于流式响应）
@@ -222,151 +251,44 @@ func CreateSessionOnly(userName string, title string) (string, code.Code) {
 }
 
 // Generate 同步生成响应
-func Generate(userName string, sessionID string, userContent string, toolNames []string) (*AgentResult, code.Code) {
-	return GenerateWithContext(ctx, userName, sessionID, userContent, toolNames)
+func Generate(userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
+	return GenerateWithContext(ctx, userName, sessionID, userContent, toolNames, thinkingMode)
 }
 
 // GenerateWithContext 带上下文的同步生成响应
-func GenerateWithContext(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string) (*AgentResult, code.Code) {
-	// 1：获取 Agent 管理器
-	agentMgr := agent.GetAgentManager()
+func GenerateWithContext(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
+	agentMgr := agentcommon.GetAgentManager()
 
-	// 2：从 Redis 获取消息历史
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		log.Println("Generate getMessagesFromRedis error:", err)
 		return nil, code.CodeServerBusy
 	}
 
-	// 3：计算下一个索引
 	nextIndex := len(history)
 
-	// 4：保存用户消息
-	userMsg := &model.Message{
-		SessionID: sessionID,
-		UserName:  userName,
-		Index:     nextIndex,
-		Role:      "user",
-		Content:   userContent,
-		CreatedAt: time.Now(),
-	}
-	_ = appendMessageToRedis(sessionID, userContent, "user", nextIndex)
-	saveMessageToDBNew(userMsg)
+	userMsg := buildUserMessage(sessionID, userName, nextIndex, userContent)
+	_ = appendMessageToRedis(userMsg)
+	publishMessageToDB(userMsg)
 
-	// 5：构建消息
 	messages := buildMessages(history, userContent)
 
-	// 6：调用 Agent 生成响应
-	aiResponse, err := agentMgr.GenerateWithTools(ctx, sessionID, userName, messages, toolNames)
+	aiResponse, err := agentMgr.GenerateWithTools(ctx, sessionID, userName, messages, toolNames, thinkingMode)
 	if err != nil {
 		log.Println("Generate error:", err)
 		return nil, code.AIModelFail
 	}
 
-	// 7：保存 AI 响应
-	aiIndex := nextIndex + 1
-	_ = appendMessageToRedis(sessionID, aiResponse.Content, "assistant", aiIndex)
-	saveMessageToDB(sessionID, aiResponse.Content, userName, "assistant", nil)
+	result := agentcommon.ResultFromMessage(aiResponse)
+	aiMsg := buildAssistantMessage(sessionID, userName, nextIndex+1, result)
+	_ = appendMessageToRedis(aiMsg)
+	publishMessageToDB(aiMsg)
 
-	return &AgentResult{
-		SessionID:    sessionID,
-		MessageIndex: aiIndex,
-		Role:         "assistant",
-		Content:      aiResponse.Content,
-	}, code.CodeSuccess
+	return buildAgentResult(sessionID, aiMsg.Index, result), code.CodeSuccess
 }
 
-// Stream 流式生成响应
-func Stream(userName string, sessionID string, userContent string, toolNames []string, writer http.ResponseWriter) code.Code {
-	return StreamWithContext(ctx, userName, sessionID, userContent, toolNames, writer)
-}
-
-// StreamWithContext 带上下文的流式生成响应
-func StreamWithContext(ctx context.Context, userName string, sessionID string, userContent string, toolNames []string, writer http.ResponseWriter) code.Code {
-	flusher, ok := writer.(http.Flusher)
-	if !ok {
-		log.Println("Stream: streaming unsupported")
-		return code.CodeServerBusy
-	}
-	_ = flusher // 避免未使用警告
-
-	// 1：获取 Agent 管理器
-	agentMgr := agent.GetAgentManager()
-
-	// 2：从 Redis 获取消息历史
-	history, err := getMessagesFromRedis(sessionID)
-	if err != nil {
-		log.Println("Stream getMessagesFromRedis error:", err)
-		return code.CodeServerBusy
-	}
-
-	// 3：计算索引
-	nextIndex := len(history)
-	aiIndex := nextIndex + 1
-
-	// 4：发送 meta 事件
-	sendSSEEvent(writer, SSEEventTypeMeta, MetaEvent{
-		SessionID:    sessionID,
-		MessageIndex: aiIndex,
-	})
-
-	// 5：保存用户消息
-	userMsg := &model.Message{
-		SessionID: sessionID,
-		UserName:  userName,
-		Index:     nextIndex,
-		Role:      "user",
-		Content:   userContent,
-		CreatedAt: time.Now(),
-	}
-	_ = appendMessageToRedis(sessionID, userContent, "user", nextIndex)
-	saveMessageToDBNew(userMsg)
-
-	// 6：构建消息
-	messages := buildMessages(history, userContent)
-
-	// 7：流式调用 Agent
-	var fullResponse string
-	var toolCalls []model.ToolCall
-
-	contentCb := func(content string) {
-		fullResponse += content
-		sendSSEEvent(writer, SSEEventTypeContentDelta, ContentDeltaEvent{
-			Content: content,
-		})
-	}
-
-	toolCallCb := func(tc model.ToolCall) {
-		toolCalls = append(toolCalls, tc)
-		sendSSEEvent(writer, SSEEventTypeToolCall, ToolCallEvent{
-			ToolID:    tc.ToolID,
-			Function:  tc.Function,
-			Arguments: tc.Arguments,
-		})
-	}
-
-	fullResponse, toolCalls, err = agentMgr.StreamWithCallbacks(ctx, sessionID, userName, messages, toolNames, contentCb, toolCallCb)
-	if err != nil {
-		log.Println("Stream error:", err)
-		sendSSEError(writer, code.AIModelFail)
-		return code.AIModelFail
-	}
-
-	// 8：发送结束事件
-	sendSSEEvent(writer, SSEEventTypeMessageEnd, MessageEndEvent{
-		Status: "completed",
-	})
-
-	// 9：保存 AI 响应
-	_ = appendMessageToRedis(sessionID, fullResponse, "assistant", aiIndex)
-	saveMessageToDB(sessionID, fullResponse, userName, "assistant", toolCalls)
-
-	return code.CodeSuccess
-}
-
-// StreamWithMeta 流式生成响应（带会话创建）
-func StreamWithMeta(userName string, sessionID string, userContent string, toolNames []string, writer http.ResponseWriter) (*AgentResult, code.Code) {
-	// 如果没有 session_id，先创建
+// OpenStreamWithMeta 打开一个可供 controller 消费的 SSE 事件流。
+func OpenStreamWithMeta(c *gin.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
 	if sessionID == "" {
 		var code_ code.Code
 		sessionID, code_ = CreateSessionOnly(userName, userContent)
@@ -375,84 +297,154 @@ func StreamWithMeta(userName string, sessionID string, userContent string, toolN
 		}
 	}
 
-	code_ := StreamWithContext(ctx, userName, sessionID, userContent, toolNames, writer)
-	if code_ != code.CodeSuccess {
-		return nil, code_
+	return openStreamWithSession(c, userName, sessionID, userContent, toolNames, thinkingMode)
+}
+
+func openStreamWithSession(c *gin.Context, userName string, sessionID string, userContent string, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+	agentMgr := agentcommon.GetAgentManager()
+
+	history, err := getMessagesFromRedis(sessionID)
+	if err != nil {
+		log.Println("OpenStream getMessagesFromRedis error:", err)
+		return nil, code.CodeServerBusy
 	}
 
-	return &AgentResult{
+	nextIndex := len(history)
+	aiIndex := nextIndex + 1
+
+	userMsg := buildUserMessage(sessionID, userName, nextIndex, userContent)
+	_ = appendMessageToRedis(userMsg)
+	publishMessageToDB(userMsg)
+
+	messages := buildMessages(history, userContent)
+	msgReader, err := agentMgr.OpenStreamWithTools(ctx, sessionID, userName, messages, toolNames, thinkingMode)
+	if err != nil {
+		log.Println("OpenStream OpenStreamWithTools error:", err)
+		return nil, code.AIModelFail
+	}
+
+	events := make(chan SSEEvent)
+	go func() {
+		defer close(events)
+
+		if err := emitEvent(ctx, events, SSEEvent{
+			Type:         SSEEventTypeMeta,
+			SessionID:    sessionID,
+			MessageIndex: aiIndex,
+		}); err != nil {
+			return
+		}
+
+		result, err := agentcommon.ConsumeStream(msgReader, thinkingMode, func(event agentcommon.StreamEvent) error {
+			sseEvent := translateStreamEvent(event)
+			if sseEvent.Type == "" {
+				return nil
+			}
+			return emitEvent(ctx, events, sseEvent)
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Println("OpenStream consume error:", err)
+			_ = emitEvent(ctx, events, SSEEvent{
+				Type:   SSEEventTypeMessageEnd,
+				Status: "error",
+			})
+			return
+		}
+
+		if err := emitEvent(ctx, events, SSEEvent{
+			Type:   SSEEventTypeMessageEnd,
+			Status: "completed",
+		}); err != nil {
+			return
+		}
+
+		aiMsg := buildAssistantMessage(sessionID, userName, aiIndex, result)
+		_ = appendMessageToRedis(aiMsg)
+		publishMessageToDB(aiMsg)
+	}()
+
+	return &StreamHandle{
 		SessionID: sessionID,
+		Events:    events,
 	}, code.CodeSuccess
 }
 
-// CreateSessionAndStream 创建新会话并流式响应
-func CreateSessionAndStream(userName string, userContent string, toolNames []string, writer http.ResponseWriter) (string, code.Code) {
-	sessionID, code_ := CreateSessionOnly(userName, userContent)
-	if code_ != code.CodeSuccess {
-		return "", code_
+// OpenRegenerateStream 打开重新生成的 SSE 事件流。
+func OpenRegenerateStream(c *gin.Context, userName string, sessionID string, fromIndex int, toolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+	if code_ := validateRegenerateSession(sessionID, fromIndex); code_ != code.CodeSuccess {
+		return nil, code_
 	}
 
-	code_ = Stream(userName, sessionID, userContent, toolNames, writer)
-	if code_ != code.CodeSuccess {
-		return sessionID, code_
-	}
-
-	return sessionID, code.CodeSuccess
-}
-
-// Regenerate 重新生成响应
-func Regenerate(ctx context.Context, userName string, sessionID string, fromIndex int, toolNames []string, writer http.ResponseWriter, stream bool) (*AgentResult, code.Code) {
-	// 1. 验证会话存在
-	sess, err := session.GetSessionByID(sessionID)
-	if err != nil || sess == nil {
-		return nil, code.CodeSessionNotFound
-	}
-
-	// 2. 验证索引有效性
-	count, err := message.GetMessageCount(sessionID)
-	if err != nil {
-		return nil, code.CodeServerBusy
-	}
-	if fromIndex < 0 || fromIndex >= count {
-		return nil, code.CodeInvalidParams
-	}
-
-	// 3. 截断消息
-	err = message.TruncateMessages(sessionID, fromIndex)
-	if err != nil {
-		return nil, code.CodeServerBusy
-	}
-
-	// 4. 清除 Redis 缓存
 	redis_cache.DeleteMessages(sessionID)
+	agentcommon.GetAgentManager().ClearAgent(sessionID)
 
-	// 5. 清除 Agent 缓存
-	agent.GetAgentManager().ClearAgent(sessionID)
-
-	// 6. 获取截断后的历史
 	history, err := getMessagesFromRedis(sessionID)
 	if err != nil {
 		return nil, code.CodeServerBusy
 	}
 
-	// 7. 获取最后一条用户消息
-	var lastUserContent string
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "user" {
-			lastUserContent = history[i].Content
-			break
-		}
-	}
-
+	lastUserContent := getLastUserContent(history)
 	if lastUserContent == "" {
 		return nil, code.CodeInvalidParams
 	}
 
-	// 8. 重新生成响应
-	if stream {
-		return StreamWithMeta(userName, sessionID, lastUserContent, toolNames, writer)
+	return openStreamWithSession(c, userName, sessionID, lastUserContent, toolNames, thinkingMode)
+}
+
+// Regenerate 重新生成同步响应
+func Regenerate(c *gin.Context, userName string, sessionID string, fromIndex int, toolNames []string, thinkingMode bool) (*AgentResult, code.Code) {
+	ctx := c.Request.Context()
+	if code_ := validateRegenerateSession(sessionID, fromIndex); code_ != code.CodeSuccess {
+		return nil, code_
 	}
-	return GenerateWithContext(ctx, userName, sessionID, lastUserContent, toolNames)
+
+	redis_cache.DeleteMessages(sessionID)
+	agentcommon.GetAgentManager().ClearAgent(sessionID)
+
+	history, err := getMessagesFromRedis(sessionID)
+	if err != nil {
+		return nil, code.CodeServerBusy
+	}
+
+	lastUserContent := getLastUserContent(history)
+	if lastUserContent == "" {
+		return nil, code.CodeInvalidParams
+	}
+
+	return GenerateWithContext(ctx, userName, sessionID, lastUserContent, toolNames, thinkingMode)
+}
+
+func validateRegenerateSession(sessionID string, fromIndex int) code.Code {
+	sess, err := session.GetSessionByID(sessionID)
+	if err != nil || sess == nil {
+		return code.CodeSessionNotFound
+	}
+
+	count, err := message.GetMessageCount(sessionID)
+	if err != nil {
+		return code.CodeServerBusy
+	}
+	if fromIndex < 0 || fromIndex >= count {
+		return code.CodeInvalidParams
+	}
+
+	if err := message.TruncateMessages(sessionID, fromIndex); err != nil {
+		return code.CodeServerBusy
+	}
+
+	return code.CodeSuccess
+}
+
+func getLastUserContent(history []*model.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			return history[i].Content
+		}
+	}
+	return ""
 }
 
 // GetMessages 获取会话消息列表

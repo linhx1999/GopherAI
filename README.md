@@ -6,6 +6,7 @@
 
 - **多模型 AI 对话** - 支持 OpenAI 兼容模型、Ollama 本地模型、阿里云 RAG 模型
 - **流式响应** - 支持 SSE 流式输出，实时展示 AI 回复
+- **思考模式** - 支持在聊天页切换普通模型与思考模型，并在模型返回推理内容时展示思考过程
 - **RAG 知识库** - 上传文档构建知识库，基于向量检索增强生成
   - 支持文档切分（Markdown 标题切分、文本固定长度切分）
   - 支持指定文件进行 RAG 对话
@@ -119,7 +120,8 @@ pnpm dev
 | 变量 | 说明 |
 |------|------|
 | `OPENAI_API_KEY` | API 密钥 |
-| `OPENAI_MODEL_NAME` | 模型名称 |
+| `OPENAI_MODEL_NAME` | 默认对话模型名称 |
+| `OPENAI_REASONING_MODEL_NAME` | 思考模式使用的推理模型名称 |
 | `OPENAI_BASE_URL` | API 基础 URL |
 
 ### RAG 配置
@@ -154,10 +156,9 @@ pnpm dev
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/AI/chat/sessions` | 获取会话列表 |
-| POST | `/api/v1/AI/chat/send` | 发送消息 |
-| POST | `/api/v1/AI/chat/send-stream` | 发送消息 (流式) |
-| POST | `/api/v1/AI/chat/history` | 获取会话历史 |
+| POST | `/api/v1/agent` | 发送消息/重新生成，支持普通与思考模式 |
+| GET | `/api/v1/agent/:session_id/messages` | 获取会话消息 |
+| GET | `/api/v1/tools` | 获取可用工具列表 |
 
 ### 其他接口
 
@@ -218,6 +219,39 @@ GopherAI/
         ├── router/      # 前端路由
         └── utils/api.js # API 封装
 ```
+
+## 思考模式
+
+前端聊天输入区提供“思考”开关：
+
+- 关闭时，请求使用 `OPENAI_MODEL_NAME`
+- 打开时，请求使用 `OPENAI_REASONING_MODEL_NAME`
+- 如果模型在响应中返回推理内容，前端会用 `Think` 组件实时展示思考过程
+- 如果模型未返回推理内容，则只展示最终回答
+
+### Agent 请求示例
+
+```json
+{
+  "session_id": "sess_001",
+  "message": "帮我分析一下这个方案",
+  "tools": ["knowledge_search"],
+  "thinking_mode": true,
+  "stream": true
+}
+```
+
+### SSE 事件
+
+思考模式流式响应除现有 `content_delta` 外，还可能返回：
+
+```text
+data: {"type":"reasoning_delta","content":"先确认问题约束..."}
+data: {"type":"reasoning_end","status":"completed"}
+```
+
+后端基于 Eino 的 `agent.Stream(...).Recv()` 消费底层 `*schema.Message`。`common/agent` 统一完成流聚合，`service` 输出结构化事件 channel，`controller` 中的 `ChatHandler` 先创建事件 channel，再用 `go handleStreamRequest(...)` 把 service 事件转发进该 channel，最后统一调用 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 逐条输出 SSE；channel 关闭时还会追加一个 `data: [DONE]` 结束标记。思维链和正文由不同 chunk 输出；服务端在收到第一个正文 chunk 前发送 `reasoning_end`，前端在本地逐字动画结束前不会回退到完整文本，因此思维链和正文都会保持连续流式展示。
+消息缓存和异步落库都会保留 `index` 与 `tool_calls`，同步与流式两条路径共享同一份 assistant 聚合结果。
 
 ## 支持的 AI 模型
 

@@ -6,23 +6,18 @@ import (
 	"GopherAI/utils"
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino/schema"
 	eino_model "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
-
-// StreamCallback 流式响应回调函数
-type StreamCallback func(msg string)
 
 // LLMClient 统一的大模型客户端
 type LLMClient struct {
-	llm eino_model.ToolCallingChatModel
-	mu  sync.RWMutex
+	models map[string]eino_model.ToolCallingChatModel
+	mu     sync.RWMutex
 }
 
 var (
@@ -33,55 +28,27 @@ var (
 // GetLLMClient 获取全局 LLM 客户端实例
 func GetLLMClient() *LLMClient {
 	clientOnce.Do(func() {
-		globalClient = &LLMClient{}
+		globalClient = &LLMClient{
+			models: make(map[string]eino_model.ToolCallingChatModel),
+		}
 	})
 	return globalClient
 }
 
 // Init 初始化 LLM 客户端
 func (c *LLMClient) Init(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	conf := config.GetConfig()
-	apiKey := conf.OpenAIConfig.ApiKey
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-
-	modelName := conf.OpenAIConfig.ModelName
-	if modelName == "" {
-		modelName = os.Getenv("OPENAI_MODEL_NAME")
-	}
-
-	baseURL := conf.OpenAIConfig.BaseUrl
-	if baseURL == "" {
-		baseURL = os.Getenv("OPENAI_BASE_URL")
-	}
-
-	llm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		BaseURL: baseURL,
-		Model:   modelName,
-		APIKey:  apiKey,
-	})
-	if err != nil {
-		return fmt.Errorf("create openai model failed: %v", err)
-	}
-
-	c.llm = llm
-	return nil
+	_, _, err := c.GetModelForMode(ctx, false)
+	return err
 }
 
 // Generate 同步生成响应
 func (c *LLMClient) Generate(ctx context.Context, messages []*schema.Message) (*schema.Message, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if c.llm == nil {
-		return nil, fmt.Errorf("llm client not initialized")
+	model, _, err := c.GetModelForMode(ctx, false)
+	if err != nil {
+		return nil, err
 	}
 
-	resp, err := c.llm.Generate(ctx, messages)
+	resp, err := model.Generate(ctx, messages)
 	if err != nil {
 		return nil, fmt.Errorf("llm generate failed: %v", err)
 	}
@@ -89,50 +56,93 @@ func (c *LLMClient) Generate(ctx context.Context, messages []*schema.Message) (*
 	return resp, nil
 }
 
-// Stream 流式生成响应
-func (c *LLMClient) Stream(ctx context.Context, messages []*schema.Message, cb StreamCallback) (string, error) {
+func getOpenAIAPIKey() string {
+	conf := config.GetConfig()
+	if conf.OpenAIConfig.ApiKey != "" {
+		return conf.OpenAIConfig.ApiKey
+	}
+	return os.Getenv("OPENAI_API_KEY")
+}
+
+func getOpenAIBaseURL() string {
+	conf := config.GetConfig()
+	if conf.OpenAIConfig.BaseUrl != "" {
+		return conf.OpenAIConfig.BaseUrl
+	}
+	return os.Getenv("OPENAI_BASE_URL")
+}
+
+func getDefaultModelName() string {
+	conf := config.GetConfig()
+	if conf.OpenAIConfig.ModelName != "" {
+		return conf.OpenAIConfig.ModelName
+	}
+	return os.Getenv("OPENAI_MODEL_NAME")
+}
+
+func getReasoningModelName() string {
+	conf := config.GetConfig()
+	if conf.OpenAIConfig.ReasoningModelName != "" {
+		return conf.OpenAIConfig.ReasoningModelName
+	}
+	if modelName := os.Getenv("OPENAI_REASONING_MODEL_NAME"); modelName != "" {
+		return modelName
+	}
+	return getDefaultModelName()
+}
+
+func (c *LLMClient) getOrCreateModel(ctx context.Context, modelName string) (eino_model.ToolCallingChatModel, error) {
+	if modelName == "" {
+		return nil, fmt.Errorf("model name is empty")
+	}
+
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	if cached, ok := c.models[modelName]; ok {
+		c.mu.RUnlock()
+		return cached, nil
+	}
+	c.mu.RUnlock()
 
-	if c.llm == nil {
-		return "", fmt.Errorf("llm client not initialized")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if cached, ok := c.models[modelName]; ok {
+		return cached, nil
 	}
 
-	stream, err := c.llm.Stream(ctx, messages)
+	apiKey := getOpenAIAPIKey()
+	if apiKey == "" {
+		return nil, fmt.Errorf("openai api key is empty")
+	}
+
+	llm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		BaseURL: getOpenAIBaseURL(),
+		Model:   modelName,
+		APIKey:  apiKey,
+	})
 	if err != nil {
-		return "", fmt.Errorf("llm stream failed: %v", err)
-	}
-	defer stream.Close()
-
-	var fullResp strings.Builder
-
-	for {
-		msg, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("llm stream recv failed: %v", err)
-		}
-		if len(msg.Content) > 0 {
-			fullResp.WriteString(msg.Content)
-			if cb != nil {
-				cb(msg.Content)
-			}
-		}
+		return nil, fmt.Errorf("create openai model failed: %v", err)
 	}
 
-	return fullResp.String(), nil
+	c.models[modelName] = llm
+	return llm, nil
+}
+
+// GetModelForMode 按模式获取底层模型。
+func (c *LLMClient) GetModelForMode(ctx context.Context, thinkingMode bool) (eino_model.ToolCallingChatModel, string, error) {
+	modelName := getDefaultModelName()
+	if thinkingMode {
+		modelName = getReasoningModelName()
+	}
+
+	model, err := c.getOrCreateModel(ctx, modelName)
+	if err != nil {
+		return nil, "", err
+	}
+	return model, modelName, nil
 }
 
 // ConvertMessages 将 model.Message 转换为 schema.Message
 func ConvertMessages(messages []*model.Message) []*schema.Message {
 	return utils.ConvertToSchemaMessages(messages)
-}
-
-// GetModel 获取底层模型（用于 React Agent）
-func (c *LLMClient) GetModel() eino_model.ToolCallingChatModel {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.llm
 }

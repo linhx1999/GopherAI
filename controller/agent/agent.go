@@ -1,25 +1,30 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	"GopherAI/common/code"
 	"GopherAI/common/agent/tools"
+	"GopherAI/common/code"
 	"GopherAI/controller"
-	agentService "GopherAI/service/agent"
 	"GopherAI/model"
+	agentService "GopherAI/service/agent"
 )
+
+const ginSSEEventName = "message"
 
 // AgentRequest 统一请求结构
 type AgentRequest struct {
-	SessionID      string   `json:"session_id"`       // 可选，为空则创建新会话
-	Message        string   `json:"message"`          // 可选，重新生成时可为空
-	RegenerateFrom *int     `json:"regenerate_from"`  // 可选，从此索引截断重新生成
-	Tools          []string `json:"tools"`            // 可选，工具列表
-	Stream         bool     `json:"stream"`           // 是否流式响应，默认 true
+	SessionID      string   `json:"session_id"`      // 可选，为空则创建新会话
+	Message        string   `json:"message"`         // 可选，重新生成时可为空
+	RegenerateFrom *int     `json:"regenerate_from"` // 可选，从此索引截断重新生成
+	Tools          []string `json:"tools"`           // 可选，工具列表
+	ThinkingMode   bool     `json:"thinking_mode"`   // 可选，是否启用思考模型
+	Stream         bool     `json:"stream"`          // 是否流式响应，默认 true
 }
 
 // MessageItem 消息项
@@ -36,7 +41,7 @@ type MessageItem struct {
 // 支持两种场景：
 // 1. 正常对话：传入 message，可选传入 session_id 和 tools
 // 2. 重新生成：传入 session_id 和 regenerate_from
-func AgentHandler(c *gin.Context) {
+func ChatHandler(c *gin.Context) {
 	req := new(AgentRequest)
 	userName := c.GetString("userName")
 
@@ -51,47 +56,45 @@ func AgentHandler(c *gin.Context) {
 	// 默认流式响应
 	stream := req.Stream
 	if stream {
-		handleStreamRequest(c, req, userName)
+		setSSEHeaders(c)
+		events := make(chan agentService.SSEEvent)
+		go handleStreamRequest(c, events, req, userName)
+
+		c.Stream(func(w io.Writer) bool {
+			select {
+			// 监听客户端是否主动断开连接
+			case <-c.Request.Context().Done():
+				return false
+
+			// 接收大模型吐出的数据
+			case msg, ok := <-events:
+				if !ok {
+					// 通道关闭，说明大模型生成结束
+					// 按照 SSE 规范，通常会发送一个 [DONE] 标识，前端可以据此结束接收
+					c.SSEvent(ginSSEEventName, "[DONE]")
+					return false
+				}
+
+				// c.SSEvent 会自动帮你把数据包装成 SSE 的格式: "data: {msg}\n\n"
+				// 第一个参数是事件名（通常默认留空或者写 message），第二个参数是数据本身
+				c.SSEvent(ginSSEEventName, msg)
+				return true
+			}
+		})
 	} else {
 		handleSyncRequest(c, req, userName)
 	}
 }
 
 // handleStreamRequest 处理流式请求
-func handleStreamRequest(c *gin.Context, req *AgentRequest, userName string) {
-	// 设置 SSE 头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+func handleStreamRequest(c *gin.Context, events chan<- agentService.SSEEvent, req *AgentRequest, userName string) {
+	defer close(events)
 
-	// 重新生成场景
-	if req.RegenerateFrom != nil {
-		if req.SessionID == "" {
-			sendSSEError(c.Writer, code.CodeInvalidParams, "session_id is required for regenerate")
-			return
-		}
-		result, code_ := agentService.Regenerate(c.Request.Context(), userName, req.SessionID, *req.RegenerateFrom, req.Tools, c.Writer, true)
-		if code_ != code.CodeSuccess {
-			sendSSEError(c.Writer, code_, "")
-		}
-		_ = result
+	source := resolveStreamSource(c, req, userName)
+	if source == nil {
 		return
 	}
-
-	// 验证消息
-	if req.Message == "" {
-		sendSSEError(c.Writer, code.CodeInvalidParams, "message is required")
-		return
-	}
-
-	// 正常对话场景
-	result, code_ := agentService.StreamWithMeta(userName, req.SessionID, req.Message, req.Tools, c.Writer)
-	if code_ != code.CodeSuccess {
-		sendSSEError(c.Writer, code_, "")
-		return
-	}
-	_ = result
+	forwardSSEEvents(c.Request.Context(), events, source)
 }
 
 // handleSyncRequest 处理同步请求
@@ -105,7 +108,7 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 			})
 			return
 		}
-		result, code_ := agentService.Regenerate(c.Request.Context(), userName, req.SessionID, *req.RegenerateFrom, req.Tools, nil, false)
+		result, code_ := agentService.Regenerate(c, userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
 		if code_ != code.CodeSuccess {
 			c.JSON(http.StatusOK, controller.Response{
 				Code: code_,
@@ -117,11 +120,12 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 			Code: code.CodeSuccess,
 			Msg:  code.CodeSuccess.Msg(),
 			Data: []interface{}{gin.H{
-				"session_id":    result.SessionID,
-				"message_index": result.MessageIndex,
-				"role":          result.Role,
-				"content":       result.Content,
-				"tool_calls":    result.ToolCalls,
+				"session_id":        result.SessionID,
+				"message_index":     result.MessageIndex,
+				"role":              result.Role,
+				"content":           result.Content,
+				"reasoning_content": result.ReasoningContent,
+				"tool_calls":        result.ToolCalls,
 			}},
 		})
 		return
@@ -151,7 +155,7 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 	}
 
 	// 正常对话
-	result, code_ := agentService.GenerateWithContext(c.Request.Context(), userName, sessionID, req.Message, req.Tools)
+	result, code_ := agentService.GenerateWithContext(c.Request.Context(), userName, sessionID, req.Message, req.Tools, req.ThinkingMode)
 	if code_ != code.CodeSuccess {
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code_,
@@ -164,11 +168,12 @@ func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
 		Data: []interface{}{gin.H{
-			"session_id":    sessionID,
-			"message_index": result.MessageIndex,
-			"role":          result.Role,
-			"content":       result.Content,
-			"tool_calls":    result.ToolCalls,
+			"session_id":        sessionID,
+			"message_index":     result.MessageIndex,
+			"role":              result.Role,
+			"content":           result.Content,
+			"reasoning_content": result.ReasoningContent,
+			"tool_calls":        result.ToolCalls,
 		}},
 	})
 }
@@ -227,14 +232,65 @@ func GetTools(c *gin.Context) {
 	})
 }
 
-// sendSSEError 发送 SSE 错误
-func sendSSEError(writer http.ResponseWriter, code_ code.Code, message string) {
+func setSSEHeaders(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+}
+
+func singleSSEvent(event agentService.SSEEvent) <-chan agentService.SSEEvent {
+	events := make(chan agentService.SSEEvent, 1)
+	events <- event
+	close(events)
+	return events
+}
+
+func resolveStreamSource(c *gin.Context, req *AgentRequest, userName string) <-chan agentService.SSEEvent {
+	if req.RegenerateFrom != nil {
+		if req.SessionID == "" {
+			return errorEventStream(code.CodeInvalidParams, "session_id is required for regenerate")
+		}
+		handle, code_ := agentService.OpenRegenerateStream(c, userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
+		if code_ != code.CodeSuccess {
+			return errorEventStream(code_, "")
+		}
+		return handle.Events
+	}
+
+	if req.Message == "" {
+		return errorEventStream(code.CodeInvalidParams, "message is required")
+	}
+
+	handle, code_ := agentService.OpenStreamWithMeta(c, userName, req.SessionID, req.Message, req.Tools, req.ThinkingMode)
+	if code_ != code.CodeSuccess {
+		return errorEventStream(code_, "")
+	}
+	return handle.Events
+}
+
+func forwardSSEEvents(ctx context.Context, dst chan<- agentService.SSEEvent, src <-chan agentService.SSEEvent) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-src:
+			if !ok {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case dst <- event:
+			}
+		}
+	}
+}
+
+func errorEventStream(code_ code.Code, message string) <-chan agentService.SSEEvent {
 	errorMsg := message
 	if errorMsg == "" {
 		errorMsg = fmt.Sprintf("Error code: %d", code_)
 	}
-	writer.Write([]byte(fmt.Sprintf("data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", errorMsg)))
-	if flusher, ok := writer.(http.Flusher); ok {
-		flusher.Flush()
-	}
+	return singleSSEvent(agentService.NewErrorEvent(errorMsg))
 }
