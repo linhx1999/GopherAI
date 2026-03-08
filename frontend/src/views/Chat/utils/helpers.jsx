@@ -1,5 +1,5 @@
 import { Avatar, Typography } from 'antd'
-import { CopyOutlined, RedoOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
+import { CopyOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import XMarkdown from '@ant-design/x-markdown'
 import { COLORS, MESSAGE_MAX_WIDTH } from '../config/constants'
 
@@ -16,7 +16,7 @@ export const generateMessageId = () => {
 export const createMessageActions = (isUser) => {
   const baseItems = [{ key: 'copy', icon: <CopyOutlined />, label: '复制' }]
   if (isUser) {
-    return [...baseItems, { key: 'retry', icon: <RedoOutlined />, label: '重发' }]
+    return baseItems
   }
   return [...baseItems, { key: 'tts', icon: <SoundOutlined />, label: '朗读' }]
 }

@@ -18,12 +18,11 @@ const ginSSEEventName = "message"
 
 // AgentRequest 统一请求结构
 type AgentRequest struct {
-	SessionID      string   `json:"session_id"`      // 可选，为空则创建新会话
-	Message        string   `json:"message"`         // 可选，重新生成时可为空
-	RegenerateFrom *int     `json:"regenerate_from"` // 可选，从此索引截断重新生成
-	Tools          []string `json:"tools"`           // 可选，工具列表
-	ThinkingMode   bool     `json:"thinking_mode"`   // 可选，是否启用思考模型
-	Stream         bool     `json:"stream"`          // 是否流式响应，默认 true
+	SessionID    string   `json:"session_id"`    // 可选，为空则创建新会话
+	Message      string   `json:"message"`       // 必填，用户消息内容
+	Tools        []string `json:"tools"`         // 可选，工具列表
+	ThinkingMode bool     `json:"thinking_mode"` // 可选，是否启用思考模型
+	Stream       bool     `json:"stream"`        // 是否流式响应，默认 true
 }
 
 // AgentHandler 统一 Agent 处理入口
@@ -50,34 +49,6 @@ func ChatHandler(c *gin.Context) {
 }
 
 func handleSyncRequest(c *gin.Context, req *AgentRequest, userName string) {
-	if req.RegenerateFrom != nil {
-		if req.SessionID == "" {
-			c.JSON(http.StatusOK, controller.Response{
-				Code: code.CodeInvalidParams,
-				Msg:  code.CodeInvalidParams.Msg(),
-			})
-			return
-		}
-		result, code_ := agentService.Regenerate(c.Request.Context(), userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
-		if code_ != code.CodeSuccess {
-			c.JSON(http.StatusOK, controller.Response{
-				Code: code_,
-				Msg:  code_.Msg(),
-			})
-			return
-		}
-		c.JSON(http.StatusOK, controller.Response{
-			Code: code.CodeSuccess,
-			Msg:  code.CodeSuccess.Msg(),
-			Data: []interface{}{gin.H{
-				"session_id":    result.SessionID,
-				"message_index": result.MessageIndex,
-				"message":       result.Message,
-			}},
-		})
-		return
-	}
-
 	if req.Message == "" {
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidParams,
@@ -197,17 +168,6 @@ func oneShotSSEStream(event agentService.StreamEvent) <-chan agentService.Stream
 }
 
 func resolveStreamSource(ctx context.Context, req *AgentRequest, userName string) <-chan agentService.StreamEvent {
-	if req.RegenerateFrom != nil {
-		if req.SessionID == "" {
-			return errorEventStream(code.CodeInvalidParams, "session_id is required for regenerate")
-		}
-		handle, code_ := agentService.OpenRegenerateStream(ctx, userName, req.SessionID, *req.RegenerateFrom, req.Tools, req.ThinkingMode)
-		if code_ != code.CodeSuccess {
-			return errorEventStream(code_, "")
-		}
-		return handle.Events
-	}
-
 	if req.Message == "" {
 		return errorEventStream(code.CodeInvalidParams, "message is required")
 	}

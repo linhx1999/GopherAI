@@ -109,37 +109,6 @@ func TestHandleStreamRequestReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	}
 }
 
-func TestHandleStreamRequestReturnsErrorEventWhenRegenerateSessionMissing(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	recorder := newCloseNotifyRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/stream", nil)
-
-	from := 3
-	events := resolveStreamSource(c.Request.Context(), &AgentRequest{
-		Stream:         true,
-		RegenerateFrom: &from,
-	}, "alice")
-
-	event, ok := <-events
-	if !ok {
-		t.Fatal("expected error event")
-	}
-	if event.Error == nil {
-		t.Fatal("expected error payload")
-	}
-	if event.Error.Type != agentService.StreamPayloadTypeError {
-		t.Fatalf("expected error type, got %q", event.Error.Type)
-	}
-	if event.Error.Message != "session_id is required for regenerate" {
-		t.Fatalf("expected regenerate validation error, got %q", event.Error.Message)
-	}
-	if _, ok := <-events; ok {
-		t.Fatal("expected channel to close after single error event")
-	}
-}
-
 func TestErrorEventStreamCanBeConsumedByGinStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

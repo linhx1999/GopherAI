@@ -20,7 +20,7 @@ func InitRouter() *gin.Engine {
 	auth.Use(jwt.Auth())
 	{
 		// Agent Chat 接口 - 统一的 RESTful 接口
-		// POST /api/v1/agent - 发送消息/重新生成
+		// POST /api/v1/agent - 发送消息
 		// GET /api/v1/agent/:session_id/messages - 获取消息列表
 		SetupAgentRoutes(auth)
 

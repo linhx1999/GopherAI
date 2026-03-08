@@ -156,7 +156,7 @@ pnpm dev
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/v1/agent` | 发送消息/重新生成，支持普通与思考模式 |
+| POST | `/api/v1/agent` | 发送消息，支持普通与思考模式 |
 | GET | `/api/v1/agent/:session_id/messages` | 获取会话消息 |
 | GET | `/api/v1/tools` | 获取可用工具列表 |
 

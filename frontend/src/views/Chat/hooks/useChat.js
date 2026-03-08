@@ -202,7 +202,7 @@ const useChat = () => {
     }
   }, [isTempSession, sessions, loadSessions])
 
-  const sendStreamMessage = useCallback(async (question, regenerateFrom = null) => {
+  const sendStreamMessage = useCallback(async (question) => {
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT}`
     const body = {
       message: question,
@@ -213,9 +213,6 @@ const useChat = () => {
 
     if (activeKey && !isTempSession) {
       body.session_id = activeKey
-    }
-    if (regenerateFrom !== null) {
-      body.regenerate_from = regenerateFrom
     }
 
     let nextMessageIndex = null
@@ -341,7 +338,7 @@ const useChat = () => {
     }
   }, [selectedTools, thinkingMode, activeKey, isTempSession, handleSessionCreated, message])
 
-  const sendNormalMessage = useCallback(async (question, regenerateFrom = null) => {
+  const sendNormalMessage = useCallback(async (question) => {
     const payload = {
       message: question,
       tools: selectedTools,
@@ -351,9 +348,6 @@ const useChat = () => {
 
     if (activeKey && !isTempSession) {
       payload.session_id = activeKey
-    }
-    if (regenerateFrom !== null) {
-      payload.regenerate_from = regenerateFrom
     }
 
     try {
@@ -398,7 +392,7 @@ const useChat = () => {
     }
   }, [message])
 
-  const handleSend = useCallback(async (content, options = {}) => {
+  const handleSend = useCallback(async (content) => {
     if (!content.trim() && attachments.length === 0) {
       message.warning('请输入消息内容或添加附件')
       return
@@ -421,21 +415,10 @@ const useChat = () => {
       messageContent = content ? `${content}\n\n[附件: ${fileNames}]` : `[附件: ${fileNames}]`
     }
 
-    if (options.regenerateFrom === undefined) {
-      const userRecord = createRecord({
-        message: { role: MESSAGE_ROLES.USER, content: messageContent }
-      })
-
-      if (options.replaceIndex !== undefined) {
-        setMessages((prev) => {
-          const next = prev.slice(0, options.replaceIndex)
-          next.push(userRecord)
-          return next
-        })
-      } else {
-        setMessages((prev) => [...prev, userRecord])
-      }
-    }
+    const userRecord = createRecord({
+      message: { role: MESSAGE_ROLES.USER, content: messageContent }
+    })
+    setMessages((prev) => [...prev, userRecord])
 
     setInputValue('')
     attachments.forEach((item) => {
@@ -447,27 +430,19 @@ const useChat = () => {
     setAttachmentsOpen(false)
 
     setCurrentPage((prevPage) => {
-      const total = options.replaceIndex !== undefined ? options.replaceIndex + 1 : messages.length + 1
+      const total = messages.length + 1
       const page = Math.ceil(total / MESSAGE_PAGE_SIZE)
       return prevPage !== page ? page : prevPage
     })
 
     if (isStreaming) {
-      await sendStreamMessage(messageContent, options.regenerateFrom)
+      await sendStreamMessage(messageContent)
     } else {
-      await sendNormalMessage(messageContent, options.regenerateFrom)
+      await sendNormalMessage(messageContent)
     }
 
     bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
   }, [attachments, handleAttachmentUpload, isStreaming, message, messages.length, sendNormalMessage, sendStreamMessage])
-
-  const handleRetry = useCallback((record) => {
-    if (record.message?.role !== MESSAGE_ROLES.USER) return
-    const index = messages.findIndex((item) => item.key === record.key)
-    if (index === -1) return
-    handleSend(record.message.content || '', { replaceIndex: index })
-    setCurrentPage(Math.ceil(messages.length / MESSAGE_PAGE_SIZE))
-  }, [messages, handleSend])
 
   const playTTS = useCallback(async (text) => {
     try {
@@ -510,13 +485,10 @@ const useChat = () => {
       case 'tts':
         playTTS(record.message?.content || '')
         break
-      case 'retry':
-        handleRetry(record)
-        break
       default:
         break
     }
-  }, [playTTS, handleRetry])
+  }, [playTTS])
 
   useEffect(() => {
     return () => {
