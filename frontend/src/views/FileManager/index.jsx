@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { App, Layout, Table, Button, Space, Upload, Modal, Tag, Tooltip, Popconfirm } from 'antd'
+import { useCallback, useEffect, useState } from 'react'
+import { App, Layout, Table, Button, Space, Upload, Tag, Tooltip, Popconfirm } from 'antd'
 import { UploadOutlined, CloudUploadOutlined, FileTextOutlined, DeleteOutlined, ReloadOutlined, CheckCircleOutlined, LoadingOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import api from '../../utils/api'
 import { API_ENDPOINTS, STATUS_CODES } from '../Chat/config/constants'
@@ -14,7 +14,7 @@ const FileManager = () => {
   const [uploading, setUploading] = useState(false)
 
   // 获取文件列表
-  const fetchFiles = async () => {
+  const fetchFiles = useCallback(async () => {
     setLoading(true)
     try {
       const response = await api.get(API_ENDPOINTS.FILE_LIST)
@@ -23,20 +23,16 @@ const FileManager = () => {
       } else {
         message.error(response.data.msg || '获取文件列表失败')
       }
-    } catch (error) {
+    } catch {
       message.error('获取文件列表失败')
     } finally {
       setLoading(false)
     }
-  }
+  }, [message])
 
   useEffect(() => {
-    let mounted = true
     fetchFiles()
-    return () => {
-      mounted = false
-    }
-  }, [])
+  }, [fetchFiles])
 
   // 上传文件
   const handleUpload = async (file) => {
@@ -56,7 +52,7 @@ const FileManager = () => {
       } else {
         message.error(response.data.msg || '文件上传失败')
       }
-    } catch (error) {
+    } catch {
       message.error('文件上传失败')
     } finally {
       setUploading(false)
@@ -75,7 +71,7 @@ const FileManager = () => {
       } else {
         message.error(response.data.msg || '创建索引失败')
       }
-    } catch (error) {
+    } catch {
       message.error('创建索引失败')
     }
   }
@@ -90,7 +86,7 @@ const FileManager = () => {
       } else {
         message.error(response.data.msg || '删除索引失败')
       }
-    } catch (error) {
+    } catch {
       message.error('删除索引失败')
     }
   }
@@ -105,7 +101,7 @@ const FileManager = () => {
       } else {
         message.error(response.data.msg || '删除文件失败')
       }
-    } catch (error) {
+    } catch {
       message.error('删除文件失败')
     }
   }
@@ -131,7 +127,7 @@ const FileManager = () => {
       title: '文件名',
       dataIndex: 'file_name',
       key: 'file_name',
-      render: (text, record) => (
+      render: (text) => (
         <Space>
           <FileTextOutlined />
           {text}
