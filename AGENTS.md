@@ -107,7 +107,9 @@ GopherAI/
         │   │   └── config/constants.js
         │   ├── FileManager/# 文件管理页面
         │   │   ├── index.jsx
-        │   │   └── index.css
+        │   │   ├── index.css
+        │   │   ├── hooks/
+        │   │   └── components/
         │   ├── Login.jsx
         │   ├── Register.jsx
         │   ├── Menu.jsx
@@ -571,6 +573,9 @@ type Response struct {
   - 支持选择已索引的文件进行 RAG 对话
 
 - **FileManager 页面**：文件管理界面
+  - 采用与 Chat 页面一致的工作台式布局：顶部工具栏 + 主内容面板
+  - 页面入口只负责装配布局，文件请求与操作逻辑集中在 `useFileManager`
+  - 表格、头部和操作区拆分为独立组件，避免单文件堆叠业务逻辑
   - 文件列表展示（文件名、大小、类型、索引状态）
   - 文件上传功能
   - 手动触发文件索引

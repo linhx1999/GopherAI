@@ -19,6 +19,7 @@
   - 手动触发文件索引
   - 索引状态监控
   - 文件和索引删除
+  - 前端采用与聊天页一致的工作台式布局和组件拆分
 - **MCP 工具调用** - 支持 Model Context Protocol，扩展 AI 能力
 - **图像识别** - 上传图片进行 AI 分析识别
 - **语音合成 (TTS)** - 将文本转换为语音输出
@@ -217,7 +218,7 @@ GopherAI/
     └── src/
         ├── views/       # 页面组件
         │   ├── AIChat/  # AI 对话页面
-        │   ├── FileManager/# 文件管理页面
+        │   ├── FileManager/# 文件管理页面（入口页 + hooks + components）
         │   ├── Login.jsx
         │   ├── Register.jsx
         │   ├── Menu.jsx

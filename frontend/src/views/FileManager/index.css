@@ -1,102 +1,242 @@
-.file-manager-container {
+.file-manager-layout {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.file-manager-header {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  padding: 0 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.file-manager-header h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .file-manager-content {
-  padding: 24px;
+  min-height: 100vh;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
 }
 
-.table-container {
-  width: 100%;
-  max-width: 1400px;
+.file-manager-toolbar {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
-.table-container .ant-table {
+.file-manager-toolbar-copy {
+  margin-left: auto;
+  text-align: right;
+}
+
+.file-manager-toolbar-copy h1 {
+  margin: 4px 0;
+  font-size: 24px;
+  color: #1677ff;
+}
+
+.file-manager-toolbar-copy p {
+  margin: 0;
+  color: #7f8c8d;
+}
+
+.file-manager-toolbar-eyebrow,
+.file-manager-panel-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(22, 119, 255, 0.08);
+  color: #1677ff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.file-manager-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 30px;
+  background:
+    radial-gradient(circle at top right, rgba(22, 119, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, #f7faff 0%, #f3f6fb 100%);
+}
+
+.file-manager-panel {
+  max-width: 1400px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 24px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.file-manager-panel-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.file-manager-panel-copy {
+  max-width: 420px;
+}
+
+.file-manager-panel-copy h2 {
+  margin: 10px 0 8px;
+  font-size: 28px;
+  line-height: 1.15;
+  color: #1f2937;
+}
+
+.file-manager-panel-copy p {
+  margin: 0;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.file-manager-panel-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.file-manager-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.file-manager-stat-card {
+  min-width: 112px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+  border: 1px solid rgba(22, 119, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.file-manager-stat-card strong {
+  display: block;
+  margin-top: 6px;
+  color: #1f2937;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.file-manager-stat-label {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.file-manager-table-panel {
+  padding: 8px 24px 24px;
+}
+
+.file-manager-table-panel .ant-table-wrapper {
+  overflow: hidden;
+}
+
+.file-manager-table-panel .ant-table {
   background: transparent;
 }
 
-.table-container .ant-table-thead > tr > th {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+.file-manager-table-panel .ant-table-container {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.file-manager-table-panel .ant-table-thead > tr > th {
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.98) 0%, rgba(239, 246, 255, 0.98) 100%);
+  color: #1f2937;
   font-weight: 600;
   padding: 16px;
 }
 
-.table-container .ant-table-tbody > tr {
-  transition: all 0.3s ease;
+.file-manager-table-panel .ant-table-tbody > tr > td {
+  padding: 14px 16px;
 }
 
-.table-container .ant-table-tbody > tr:hover {
-  background: rgba(102, 126, 234, 0.05);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+.file-manager-table-panel .ant-table-tbody > tr {
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.table-container .ant-table-tbody > tr > td {
-  padding: 12px 16px;
+.file-manager-table-panel .ant-table-tbody > tr:hover > td {
+  background: rgba(22, 119, 255, 0.04);
 }
 
-.index-message {
-  font-size: 12px;
-  color: #8c8c8c;
-  max-width: 200px;
+.file-manager-file-name {
+  color: #1f2937;
+  font-weight: 500;
+}
+
+.file-manager-index-message {
+  display: inline-block;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #6b7280;
+  font-size: 12px;
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .file-manager-header {
+.file-manager-table-panel .ant-pagination {
+  margin-top: 20px;
+  margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .file-manager-toolbar-copy {
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .file-manager-panel-toolbar {
     flex-direction: column;
-    gap: 12px;
+  }
+
+  .file-manager-panel-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .file-manager-stats {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 768px) {
+  .file-manager-toolbar {
     padding: 16px;
   }
 
-  .file-manager-header h1 {
-    font-size: 20px;
+  .file-manager-shell {
+    padding: 18px 14px;
   }
 
-  .file-manager-content {
-    padding: 16px;
+  .file-manager-panel {
+    border-radius: 18px;
   }
 
-  .table-container {
-    padding: 16px;
-    border-radius: 8px;
+  .file-manager-panel-toolbar,
+  .file-manager-table-panel {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 
-  .table-container .ant-table-thead > tr > th,
-  .table-container .ant-table-tbody > tr > td {
-    padding: 8px 12px;
-    font-size: 12px;
+  .file-manager-panel-copy h2 {
+    font-size: 24px;
+  }
+
+  .file-manager-stat-card {
+    min-width: calc(50% - 6px);
   }
 }
