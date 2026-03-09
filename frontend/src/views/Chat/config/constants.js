@@ -33,13 +33,6 @@ export const COLORS = {
 
 export const MESSAGE_MAX_WIDTH = '80%'
 
-// ==================== 工具选项 ====================
-export const TOOL_OPTIONS = [
-  { label: '知识库检索', value: 'knowledge_search', icon: 'SearchOutlined' },
-  { label: '逐步思考', value: 'sequential_thinking', icon: 'BulbOutlined' },
-  { label: '天气查询', value: 'get_weather', icon: 'CloudOutlined' },
-]
-
 // ==================== 会话菜单配置 ====================
 export const SESSION_MENU_ITEMS = [
   { label: '重命名', key: 'rename', icon: 'EditOutlined' },

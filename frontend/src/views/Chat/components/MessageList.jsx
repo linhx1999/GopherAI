@@ -11,6 +11,7 @@ const MessageList = ({
   messages,
   currentPage,
   roleConfig,
+  toolDisplayNames,
   onActionClick,
   onPageChange
 }) => {
@@ -36,14 +37,21 @@ const MessageList = ({
                 <AssistantBubble
                   key={item.key}
                   record={item.record}
-                  processes={item.processes}
+                  toolTraceRecords={item.toolTraceRecords}
+                  toolDisplayNames={toolDisplayNames}
                   onActionClick={onActionClick}
                 />
               )
             }
 
-            if (item.type === 'process') {
-              return <ToolThoughtChain key={item.key} processes={item.processes} />
+            if (item.type === 'tool_trace') {
+              return (
+                <ToolThoughtChain
+                  key={item.key}
+                  toolTraceRecords={item.toolTraceRecords}
+                  toolDisplayNames={toolDisplayNames}
+                />
+              )
             }
 
             const record = item.record

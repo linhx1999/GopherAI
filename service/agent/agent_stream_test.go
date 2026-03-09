@@ -36,17 +36,17 @@ func TestNewErrorEventBuildsErrorPayload(t *testing.T) {
 	}
 }
 
-func TestBuildMessagesUsesStoredSchemaPayload(t *testing.T) {
+func TestBuildConversationMessagesUsesStoredSchemaPayload(t *testing.T) {
 	history := []*model.Message{
 		{
 			Payload: []byte(`{"role":"user","content":"你好"}`),
 		},
 	}
 
-	messages := buildMessages(history, &schema.Message{
+	messages := buildConversationMessages(history, &schema.Message{
 		Role:    schema.User,
 		Content: "继续",
-	})
+	}, false)
 
 	if len(messages) != 3 {
 		t.Fatalf("unexpected message count: %d", len(messages))

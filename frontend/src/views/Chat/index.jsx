@@ -5,7 +5,7 @@ import ChatHeader from './components/ChatHeader'
 import MessageList from './components/MessageList'
 import InputArea from './components/InputArea'
 import useChat from './hooks/useChat'
-import { createRoleConfig } from './utils/helpers.jsx'
+import { createRoleConfig, createToolDisplayNameMap } from './utils/helpers.jsx'
 import './index.css'
 import { theme } from 'antd';
 
@@ -23,7 +23,8 @@ const Chat = () => {
   };
   const {
     // 基础状态
-    selectedTools,
+    availableTools,
+    enabledToolNames,
     thinkingMode,
     isStreaming,
     currentPage,
@@ -46,7 +47,7 @@ const Chat = () => {
     handleSend,
     handleActionClick,
     // 状态更新
-    setSelectedTools,
+    setEnabledToolNames,
     setThinkingMode,
     setIsStreaming,
     setCurrentPage,
@@ -57,6 +58,7 @@ const Chat = () => {
 
   // Role 配置
   const roleConfig = useMemo(() => createRoleConfig(), [])
+  const toolDisplayNames = useMemo(() => createToolDisplayNameMap(availableTools), [availableTools])
 
   return (
     <Layout style={style}>
@@ -81,6 +83,7 @@ const Chat = () => {
           messages={messages}
           currentPage={currentPage}
           roleConfig={roleConfig}
+          toolDisplayNames={toolDisplayNames}
           onActionClick={handleActionClick}
           onPageChange={setCurrentPage}
         />
@@ -88,14 +91,15 @@ const Chat = () => {
         <InputArea
           inputValue={inputValue}
           isLoading={isLoading}
-          selectedTools={selectedTools}
+          availableTools={availableTools}
+          enabledToolNames={enabledToolNames}
           thinkingMode={thinkingMode}
           isStreaming={isStreaming}
           attachments={attachments}
           attachmentsOpen={attachmentsOpen}
           onInputChange={setInputValue}
           onSubmit={handleSend}
-          onSelectedToolsChange={setSelectedTools}
+          onEnabledToolNamesChange={setEnabledToolNames}
           onThinkingModeChange={setThinkingMode}
           onStreamingChange={setIsStreaming}
           onAttachmentsChange={setAttachments}

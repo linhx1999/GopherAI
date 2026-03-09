@@ -69,7 +69,7 @@ func TestStreamLoopWritesSchemaMessagePayload(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
 
 	streamSSE(c, oneShotSSEStream(agentService.StreamEvent{
-		Message: &schema.Message{
+		Chunk: &schema.Message{
 			Role:             schema.Assistant,
 			Content:          "答案",
 			ReasoningContent: "先想",

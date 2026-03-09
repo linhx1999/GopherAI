@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func TestConsumeOneProducedStreamConcatsChunksAndEmitsSyntheticFinish(t *testing.T) {
+func TestCollectStreamMessageConcatsChunksAndEmitsSyntheticFinish(t *testing.T) {
 	reader := schema.StreamReaderFromArray([]*schema.Message{
 		{
 			Role:             schema.Assistant,
@@ -21,12 +21,12 @@ func TestConsumeOneProducedStreamConcatsChunksAndEmitsSyntheticFinish(t *testing
 	})
 
 	var emitted []*schema.Message
-	full, err := consumeOneProducedStream(reader, func(msg *schema.Message) error {
+	full, err := collectStreamMessage(reader, func(msg *schema.Message) error {
 		emitted = append(emitted, msg)
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("consumeOneProducedStream returned error: %v", err)
+		t.Fatalf("collectStreamMessage returned error: %v", err)
 	}
 	if full == nil {
 		t.Fatal("expected full message")
@@ -48,7 +48,7 @@ func TestConsumeOneProducedStreamConcatsChunksAndEmitsSyntheticFinish(t *testing
 	}
 }
 
-func TestConsumeOneProducedStreamKeepsExistingFinishReason(t *testing.T) {
+func TestCollectStreamMessageKeepsExistingFinishReason(t *testing.T) {
 	reader := schema.StreamReaderFromArray([]*schema.Message{
 		{
 			Role:    schema.Tool,
@@ -60,14 +60,14 @@ func TestConsumeOneProducedStreamKeepsExistingFinishReason(t *testing.T) {
 	})
 
 	var finishReasons []string
-	full, err := consumeOneProducedStream(reader, func(msg *schema.Message) error {
+	full, err := collectStreamMessage(reader, func(msg *schema.Message) error {
 		if msg.ResponseMeta != nil {
 			finishReasons = append(finishReasons, msg.ResponseMeta.FinishReason)
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("consumeOneProducedStream returned error: %v", err)
+		t.Fatalf("collectStreamMessage returned error: %v", err)
 	}
 	if full == nil || full.ResponseMeta == nil || full.ResponseMeta.FinishReason != "stop" {
 		t.Fatalf("unexpected full message response meta: %#v", full)
@@ -77,13 +77,13 @@ func TestConsumeOneProducedStreamKeepsExistingFinishReason(t *testing.T) {
 	}
 }
 
-func TestConsumeOneProducedStreamStopsOnSinkError(t *testing.T) {
+func TestCollectStreamMessageStopsOnSinkError(t *testing.T) {
 	reader := schema.StreamReaderFromArray([]*schema.Message{
 		{Role: schema.Assistant, Content: "答"},
 	})
 
 	expectedErr := errors.New("sink failed")
-	_, err := consumeOneProducedStream(reader, func(msg *schema.Message) error {
+	_, err := collectStreamMessage(reader, func(msg *schema.Message) error {
 		return expectedErr
 	})
 	if !errors.Is(err, expectedErr) {

@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	"log"
+	"sort"
+	"strings"
 	"sync"
 
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
 	einomcp "github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino-ext/components/tool/sequentialthinking"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	mcpClient "github.com/mark3labs/mcp-go/client"
 	mcpschema "github.com/mark3labs/mcp-go/mcp"
 )
@@ -16,6 +18,7 @@ import (
 // ToolInfo 工具信息（用于 API 返回）
 type ToolInfo struct {
 	Name        string                 `json:"name"`
+	DisplayName string                 `json:"display_name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	Category    string                 `json:"category"` // "builtin" | "mcp" | "rag"
@@ -29,10 +32,10 @@ type MCPClientConfig struct {
 
 // ToolRegistry 工具注册表
 type ToolRegistry struct {
-	mu          sync.RWMutex
-	builtin     map[string]tool.BaseTool           // 内置工具
-	mcpClients  map[string]mcpClient.MCPClient     // MCP 客户端
-	mcpConfigs  map[string]*MCPClientConfig        // MCP 配置
+	mu         sync.RWMutex
+	builtin    map[string]tool.BaseTool       // 内置工具
+	mcpClients map[string]mcpClient.MCPClient // MCP 客户端
+	mcpConfigs map[string]*MCPClientConfig    // MCP 配置
 }
 
 var (
@@ -99,6 +102,29 @@ func (r *ToolRegistry) GetBuiltinTool(name string) tool.BaseTool {
 	return r.builtin[name]
 }
 
+func (r *ToolRegistry) listBuiltinTools() []tool.BaseTool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]tool.BaseTool, 0, len(r.builtin))
+	for _, builtinTool := range r.builtin {
+		result = append(result, builtinTool)
+	}
+	return result
+}
+
+func (r *ToolRegistry) listMCPClientNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.mcpConfigs))
+	for clientName := range r.mcpConfigs {
+		names = append(names, clientName)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // initMCPClient 初始化 MCP 客户端
 func (r *ToolRegistry) initMCPClient(ctx context.Context, name string) (mcpClient.MCPClient, error) {
 	r.mu.RLock()
@@ -148,80 +174,92 @@ func (r *ToolRegistry) initMCPClient(ctx context.Context, name string) (mcpClien
 	return cli, nil
 }
 
-// GetToolsByNames 根据名称列表获取工具实例
-func (r *ToolRegistry) GetToolsByNames(ctx context.Context, names []string, ragFileIDs []uint) ([]tool.BaseTool, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	result := make([]tool.BaseTool, 0, len(names))
-	seen := make(map[string]struct{})
+func NormalizeToolNames(names []string) []string {
+	normalized := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 
 	for _, name := range names {
-		if _, ok := seen[name]; ok {
+		trimmedName := strings.TrimSpace(name)
+		if trimmedName == "" {
 			continue
 		}
-		seen[name] = struct{}{}
+		if _, ok := seen[trimmedName]; ok {
+			continue
+		}
+		seen[trimmedName] = struct{}{}
+		normalized = append(normalized, trimmedName)
+	}
 
-		switch name {
-		case "knowledge_search":
-			// RAG 工具需要动态创建
-			if len(ragFileIDs) > 0 {
-				result = append(result, NewRAGTool(ragFileIDs))
-			}
+	sort.Strings(normalized)
+	return normalized
+}
 
-		case "sequential_thinking":
-			// 内置工具
-			if t, ok := r.builtin["sequential_thinking"]; ok {
-				result = append(result, t)
-			}
+func (r *ToolRegistry) resolveMCPTool(ctx context.Context, toolName string) (tool.BaseTool, bool) {
+	for _, clientName := range r.listMCPClientNames() {
+		cli, err := r.initMCPClient(ctx, clientName)
+		if err != nil {
+			log.Printf("Failed to init MCP client %s: %v", clientName, err)
+			continue
+		}
 
-		default:
-			// 尝试从 MCP 客户端获取
-			for clientName := range r.mcpConfigs {
-				cli, err := r.initMCPClient(ctx, clientName)
-				if err != nil {
-					log.Printf("Failed to init MCP client %s: %v", clientName, err)
-					continue
-				}
+		mcpTools, err := einomcp.GetTools(ctx, &einomcp.Config{
+			Cli:          cli,
+			ToolNameList: []string{toolName},
+		})
+		if err != nil {
+			log.Printf("Failed to get MCP tools from %s: %v", clientName, err)
+			continue
+		}
 
-				tools, err := einomcp.GetTools(ctx, &einomcp.Config{
-					Cli:          cli,
-					ToolNameList: []string{name},
-				})
-				if err != nil {
-					log.Printf("Failed to get MCP tools from %s: %v", clientName, err)
-					continue
-				}
-
-				for _, t := range tools {
-					info, _ := t.Info(ctx)
-					if info != nil && info.Name == name {
-						result = append(result, t)
-						break
-					}
-				}
+		for _, resolvedTool := range mcpTools {
+			info, _ := resolvedTool.Info(ctx)
+			if info != nil && info.Name == toolName {
+				return resolvedTool, true
 			}
 		}
 	}
 
-	return result, nil
+	return nil, false
+}
+
+// ResolveTools 根据名称列表解析工具实例。
+func (r *ToolRegistry) ResolveTools(ctx context.Context, names []string, ragFileIDs []uint) ([]tool.BaseTool, error) {
+	normalizedNames := NormalizeToolNames(names)
+	resolvedTools := make([]tool.BaseTool, 0, len(normalizedNames))
+
+	for _, toolName := range normalizedNames {
+		switch toolName {
+		case "knowledge_search":
+			if len(ragFileIDs) > 0 {
+				resolvedTools = append(resolvedTools, NewRAGTool(ragFileIDs))
+			}
+		case "sequential_thinking":
+			if builtinTool := r.GetBuiltinTool("sequential_thinking"); builtinTool != nil {
+				resolvedTools = append(resolvedTools, builtinTool)
+			}
+		default:
+			if mcpTool, ok := r.resolveMCPTool(ctx, toolName); ok {
+				resolvedTools = append(resolvedTools, mcpTool)
+			}
+		}
+	}
+
+	return resolvedTools, nil
 }
 
 // ListAvailableTools 列出所有可用工具
 func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	result := make([]ToolInfo, 0)
 
 	// 1. 内置工具
-	for _, t := range r.builtin {
-		info, err := t.Info(ctx)
+	for _, builtinTool := range r.listBuiltinTools() {
+		info, err := builtinTool.Info(ctx)
 		if err != nil {
 			continue
 		}
 		result = append(result, ToolInfo{
 			Name:        info.Name,
+			DisplayName: toolDisplayName(info.Name),
 			Description: info.Desc,
 			Parameters:  extractParams(info),
 			Category:    "builtin",
@@ -231,6 +269,7 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 	// 2. 固定添加 knowledge_search（RAG 工具）
 	result = append(result, ToolInfo{
 		Name:        "knowledge_search",
+		DisplayName: toolDisplayName("knowledge_search"),
 		Description: "从知识库中检索相关文档。当用户问题涉及已上传的文档内容时，使用此工具获取相关信息。",
 		Parameters: map[string]interface{}{
 			"query": map[string]interface{}{
@@ -248,7 +287,7 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 	})
 
 	// 3. MCP 工具（异步加载，避免阻塞）
-	for clientName := range r.mcpConfigs {
+	for _, clientName := range r.listMCPClientNames() {
 		cli, err := r.initMCPClient(ctx, clientName)
 		if err != nil {
 			continue
@@ -266,6 +305,7 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 			}
 			result = append(result, ToolInfo{
 				Name:        info.Name,
+				DisplayName: toolDisplayName(info.Name),
 				Description: info.Desc,
 				Parameters:  extractParams(info),
 				Category:    "mcp",
@@ -273,7 +313,27 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 		}
 	}
 
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Category != result[j].Category {
+			return result[i].Category < result[j].Category
+		}
+		return result[i].DisplayName < result[j].DisplayName
+	})
+
 	return result
+}
+
+func toolDisplayName(toolName string) string {
+	switch toolName {
+	case "knowledge_search":
+		return "知识库检索"
+	case "sequential_thinking":
+		return "逐步思考"
+	case "get_weather":
+		return "天气查询"
+	default:
+		return toolName
+	}
 }
 
 // extractParams 从 ToolInfo 提取参数定义
@@ -288,11 +348,6 @@ func extractParams(info *schema.ToolInfo) map[string]interface{} {
 	// 注意：ParamsOneOf 的内部字段是未导出的，我们只能通过其他方式获取
 	// 这里返回一个空 map，实际参数需要从工具文档中获取
 	return params
-}
-
-// GetDefaultToolNames 获取默认工具名称列表
-func (r *ToolRegistry) GetDefaultToolNames() []string {
-	return []string{"knowledge_search"}
 }
 
 // HasTool 检查工具是否存在

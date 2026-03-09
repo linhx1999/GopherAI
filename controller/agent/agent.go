@@ -34,11 +34,11 @@ func GenerateHandler(c *gin.Context) {
 	}
 
 	result, code_ := agentService.Generate(c.Request.Context(), agentService.GenerateRequest{
-		UserName:     c.GetString("userName"),
-		SessionID:    req.SessionID,
-		UserMessage:  req.Message,
-		ToolNames:    req.Tools,
-		ThinkingMode: req.ThinkingMode,
+		UserName:         c.GetString("userName"),
+		SessionID:        req.SessionID,
+		UserMessage:      req.Message,
+		EnabledToolNames: req.Tools,
+		ThinkingMode:     req.ThinkingMode,
 	})
 	if code_ != code.CodeSuccess {
 		writeCodeResponse(c, code_)
@@ -63,11 +63,11 @@ func StreamHandler(c *gin.Context) {
 	}
 
 	stream, code_ := agentService.Stream(c.Request.Context(), agentService.GenerateRequest{
-		UserName:     c.GetString("userName"),
-		SessionID:    req.SessionID,
-		UserMessage:  req.Message,
-		ToolNames:    req.Tools,
-		ThinkingMode: req.ThinkingMode,
+		UserName:         c.GetString("userName"),
+		SessionID:        req.SessionID,
+		UserMessage:      req.Message,
+		EnabledToolNames: req.Tools,
+		ThinkingMode:     req.ThinkingMode,
 	})
 	if code_ != code.CodeSuccess {
 		setSSEHeaders(c)
@@ -156,8 +156,8 @@ func streamSSE(c *gin.Context, events <-chan agentService.StreamEvent) {
 				c.SSEvent(ginSSEEventName, msg.Meta)
 			case msg.Error != nil:
 				c.SSEvent(ginSSEEventName, msg.Error)
-			case msg.Message != nil:
-				c.SSEvent(ginSSEEventName, msg.Message)
+			case msg.Chunk != nil:
+				c.SSEvent(ginSSEEventName, msg.Chunk)
 			}
 			return true
 		}

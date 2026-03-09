@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { App } from 'antd'
 import api, { API_BASE_URL } from '../../../utils/api'
+import useToolCatalog from './useToolCatalog'
 import {
   ASSISTANT_DISPLAY_MODES,
   MESSAGE_PAGE_SIZE,
@@ -15,6 +16,7 @@ import {
   isMessageFinished,
   isSchemaMessagePayload,
   mergeSchemaMessageChunk,
+  normalizeEnabledToolNames,
   parseSSELine
 } from '../utils/helpers.jsx'
 
@@ -62,8 +64,8 @@ const createRecord = ({
   createdAt = null,
   renderMode = MESSAGE_RENDER_MODE.INSTANT,
   expectReasoning = false,
-  displayMode = ASSISTANT_DISPLAY_MODES.DEFAULT,
-  selectedToolNames = []
+  assistantRenderMode = ASSISTANT_DISPLAY_MODES.DEFAULT,
+  enabledToolNames = []
 }) => ({
   key,
   index,
@@ -72,16 +74,17 @@ const createRecord = ({
   createdAt,
   renderMode,
   expectReasoning,
-  displayMode,
-  selectedToolNames
+  assistantRenderMode,
+  enabledToolNames
 })
 
 const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
   const latestHistorySessionRef = useRef(null)
+  const { availableTools } = useToolCatalog()
 
-  const [selectedTools, setSelectedTools] = useState([])
+  const [enabledToolNames, setEnabledToolNames] = useState([])
   const [thinkingMode, setThinkingMode] = useState(false)
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
@@ -113,6 +116,15 @@ const useChat = () => {
   useEffect(() => {
     loadSessions()
   }, [loadSessions])
+
+  useEffect(() => {
+    if (availableTools.length === 0) {
+      return
+    }
+
+    const availableToolNames = new Set(availableTools.map((tool) => tool.name))
+    setEnabledToolNames((previousToolNames) => previousToolNames.filter((toolName) => availableToolNames.has(toolName)))
+  }, [availableTools])
 
   const loadMessages = useCallback(async (sessionId) => {
     const targetSessionId = String(sessionId)
@@ -263,16 +275,16 @@ const useChat = () => {
     }
   }, [isTempSession, sessions, loadSessions])
 
-  const createRequestOptions = useCallback(() => ({
-    selectedToolNames: [...selectedTools],
+  const buildChatRunOptions = useCallback(() => ({
+    enabledToolNames: normalizeEnabledToolNames(enabledToolNames),
     thinkingModeEnabled: thinkingMode
-  }), [selectedTools, thinkingMode])
+  }), [enabledToolNames, thinkingMode])
 
-  const buildChatRequest = useCallback((question, requestOptions) => {
+  const buildChatRequest = useCallback((question, runOptions) => {
     const payload = {
       message: question,
-      tools: requestOptions.selectedToolNames,
-      thinking_mode: requestOptions.thinkingModeEnabled,
+      tools: runOptions.enabledToolNames,
+      thinking_mode: runOptions.thinkingModeEnabled,
     }
 
     if (activeKey && !isTempSession) {
@@ -281,10 +293,10 @@ const useChat = () => {
     return payload
   }, [activeKey, isTempSession])
 
-  const sendStreamMessage = useCallback(async (question, requestOptions) => {
+  const sendStreamMessage = useCallback(async (question, runOptions) => {
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
-    const payload = buildChatRequest(question, requestOptions)
-    const hasSelectedTools = requestOptions.selectedToolNames.length > 0
+    const payload = buildChatRequest(question, runOptions)
+    const hasEnabledTools = runOptions.enabledToolNames.length > 0
 
     let nextMessageIndex = null
     let activeMessageKey = null
@@ -306,9 +318,9 @@ const useChat = () => {
         message: mergeSchemaMessageChunk({}, chunk),
         pending: !isMessageFinished(chunk),
         renderMode: MESSAGE_RENDER_MODE.STREAM,
-        expectReasoning: requestOptions.thinkingModeEnabled && chunk.role === MESSAGE_ROLES.ASSISTANT,
-        displayMode: hasSelectedTools ? ASSISTANT_DISPLAY_MODES.TOOL_CHAIN : ASSISTANT_DISPLAY_MODES.DEFAULT,
-        selectedToolNames: requestOptions.selectedToolNames
+        expectReasoning: runOptions.thinkingModeEnabled && chunk.role === MESSAGE_ROLES.ASSISTANT,
+        assistantRenderMode: hasEnabledTools ? ASSISTANT_DISPLAY_MODES.TOOL_CHAIN : ASSISTANT_DISPLAY_MODES.DEFAULT,
+        enabledToolNames: runOptions.enabledToolNames
       })
       if (nextMessageIndex !== null) {
         nextMessageIndex += 1
@@ -413,8 +425,8 @@ const useChat = () => {
     }
   }, [buildChatRequest, handleSessionCreated, message])
 
-  const sendGenerateMessage = useCallback(async (question, requestOptions) => {
-    const payload = buildChatRequest(question, requestOptions)
+  const sendGenerateMessage = useCallback(async (question, runOptions) => {
+    const payload = buildChatRequest(question, runOptions)
     try {
       const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
 
@@ -501,16 +513,16 @@ const useChat = () => {
       return prevPage !== page ? page : prevPage
     })
 
-    const requestOptions = createRequestOptions()
+    const runOptions = buildChatRunOptions()
 
     if (isStreaming) {
-      await sendStreamMessage(messageContent, requestOptions)
+      await sendStreamMessage(messageContent, runOptions)
     } else {
-      await sendGenerateMessage(messageContent, requestOptions)
+      await sendGenerateMessage(messageContent, runOptions)
     }
 
     bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
-  }, [attachments, createRequestOptions, handleAttachmentUpload, isStreaming, message, messages.length, sendGenerateMessage, sendStreamMessage])
+  }, [attachments, buildChatRunOptions, handleAttachmentUpload, isStreaming, message, messages.length, sendGenerateMessage, sendStreamMessage])
 
   const playTTS = useCallback(async (text) => {
     try {
@@ -570,7 +582,8 @@ const useChat = () => {
 
   return {
     bubbleListRef,
-    selectedTools,
+    availableTools,
+    enabledToolNames,
     thinkingMode,
     isStreaming,
     currentPage,
@@ -591,7 +604,7 @@ const useChat = () => {
     setEditTitle,
     handleSend,
     handleActionClick,
-    setSelectedTools,
+    setEnabledToolNames,
     setThinkingMode,
     setIsStreaming,
     setCurrentPage,

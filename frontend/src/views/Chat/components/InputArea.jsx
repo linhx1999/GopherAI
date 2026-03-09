@@ -10,9 +10,21 @@ import {
   CloudOutlined
 } from '@ant-design/icons'
 import { Sender, Attachments } from '@ant-design/x'
-import { TOOL_OPTIONS } from '../config/constants'
 
 const Switch = Sender.Switch
+
+const resolveToolIcon = (tool) => {
+  if (tool?.name === 'knowledge_search') {
+    return SearchOutlined
+  }
+  if (tool?.name === 'sequential_thinking') {
+    return BulbOutlined
+  }
+  if (tool?.category === 'mcp') {
+    return CloudOutlined
+  }
+  return ToolOutlined
+}
 
 /**
  * 输入区域组件（含工具选择和附件）
@@ -20,14 +32,15 @@ const Switch = Sender.Switch
 const InputArea = ({
   inputValue,
   isLoading,
-  selectedTools,
+  availableTools,
+  enabledToolNames,
   thinkingMode,
   isStreaming,
   attachments,
   attachmentsOpen,
   onInputChange,
   onSubmit,
-  onSelectedToolsChange,
+  onEnabledToolNamesChange,
   onThinkingModeChange,
   onStreamingChange,
   onAttachmentsChange,
@@ -137,28 +150,32 @@ const InputArea = ({
                       选择工具
                     </div>
                     <Checkbox.Group
-                      value={selectedTools}
-                      onChange={onSelectedToolsChange}
+                      value={enabledToolNames}
+                      onChange={onEnabledToolNamesChange}
                       style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
                     >
-                      {TOOL_OPTIONS.map(tool => {
-                        const IconComponent = tool.icon === 'SearchOutlined' ? SearchOutlined :
-                          tool.icon === 'BulbOutlined' ? BulbOutlined : CloudOutlined
+                      {availableTools.map((tool) => {
+                        const IconComponent = resolveToolIcon(tool)
                         return (
-                          <Checkbox key={tool.value} value={tool.value}>
+                          <Checkbox key={tool.name} value={tool.name}>
                             <Flex align="center" gap={4}>
                               <IconComponent />
-                              {tool.label}
+                              {tool.displayName || tool.name}
                             </Flex>
                           </Checkbox>
                         )
                       })}
                     </Checkbox.Group>
+                    {availableTools.length === 0 ? (
+                      <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+                        当前没有可用工具
+                      </div>
+                    ) : null}
                   </div>
                 )}
               >
-                <Switch value={selectedTools.length > 0} icon={<ToolOutlined />}>
-                  工具 {selectedTools.length > 0 && `(${selectedTools.length})`}
+                <Switch value={enabledToolNames.length > 0} icon={<ToolOutlined />}>
+                  工具 {enabledToolNames.length > 0 && `(${enabledToolNames.length})`}
                 </Switch>
               </Dropdown>
 

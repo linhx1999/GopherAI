@@ -8,9 +8,9 @@ import (
 	"sync"
 
 	eino_model "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
-	"github.com/cloudwego/eino/schema"
 
 	"GopherAI/common/agent/tools"
 	"GopherAI/common/llm"
@@ -21,6 +21,14 @@ import (
 type AgentManager struct {
 	mu     sync.RWMutex
 	agents map[string]*react.Agent // cacheKey -> Agent
+}
+
+type AgentSessionConfig struct {
+	EnabledToolNames []string
+	Model            eino_model.ToolCallingChatModel
+	ModelName        string
+	ToolInstances    []tool.BaseTool
+	ToolSignature    string
 }
 
 var (
@@ -38,17 +46,19 @@ func GetAgentManager() *AgentManager {
 	return manager
 }
 
-func buildAgentCacheKey(sessionID string, modelName string) string {
-	return fmt.Sprintf("%s::%s", sessionID, modelName)
+func buildAgentCacheKey(sessionID string, modelName string, toolSignature string) string {
+	return fmt.Sprintf("%s::%s::%s", sessionID, modelName, toolSignature)
 }
 
-// GetOrCreateAgent 获取或创建 Agent（根据用户名动态查询文件ID，使用默认工具）
-func (m *AgentManager) GetOrCreateAgent(ctx context.Context, sessionID string, userName string) (*react.Agent, error) {
-	return m.GetOrCreateAgentWithTools(ctx, sessionID, userName, nil, false)
+func buildToolSignature(enabledToolNames []string) string {
+	normalizedNames := tools.NormalizeToolNames(enabledToolNames)
+	if len(normalizedNames) == 0 {
+		return "no-tools"
+	}
+	return strings.Join(normalizedNames, ",")
 }
 
-// GetOrCreateAgentWithTools 获取或创建 Agent（支持自定义工具列表）
-func (m *AgentManager) GetOrCreateAgentWithTools(ctx context.Context, sessionID string, userName string, toolNames []string, thinkingMode bool) (*react.Agent, error) {
+func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userName string, enabledToolNames []string, thinkingMode bool) (*AgentSessionConfig, error) {
 	client := llm.GetLLMClient()
 	if client == nil {
 		return nil, fmt.Errorf("llm client not initialized")
@@ -58,7 +68,59 @@ func (m *AgentManager) GetOrCreateAgentWithTools(ctx context.Context, sessionID 
 	if err != nil {
 		return nil, err
 	}
-	cacheKey := buildAgentCacheKey(sessionID, modelName)
+	if model == nil {
+		return nil, fmt.Errorf("llm model not available")
+	}
+
+	fileIDs, err := file.GetIndexedFileIDsByUserName(userName)
+	if err != nil {
+		log.Printf("Warning: failed to get indexed file ids: %v", err)
+		fileIDs = []uint{}
+	}
+
+	registry := tools.GetToolRegistry()
+	normalizedToolNames := tools.NormalizeToolNames(enabledToolNames)
+	toolInstances, err := registry.ResolveTools(ctx, normalizedToolNames, fileIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tools failed: %w", err)
+	}
+
+	return &AgentSessionConfig{
+		EnabledToolNames: normalizedToolNames,
+		Model:            model,
+		ModelName:        modelName,
+		ToolInstances:    toolInstances,
+		ToolSignature:    buildToolSignature(normalizedToolNames),
+	}, nil
+}
+
+func (m *AgentManager) buildAgent(ctx context.Context, config *AgentSessionConfig) (*react.Agent, error) {
+	if config == nil || config.Model == nil {
+		return nil, fmt.Errorf("agent config not available")
+	}
+
+	log.Printf("Creating agent with model=%s, tools=%v", config.ModelName, config.EnabledToolNames)
+
+	agent, err := react.NewAgent(ctx, &react.AgentConfig{
+		ToolCallingModel: config.Model,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: config.ToolInstances,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create react agent failed: %w", err)
+	}
+
+	return agent, nil
+}
+
+// GetOrCreateAgentForChat 获取或创建指定模型和工具配置的 Agent。
+func (m *AgentManager) GetOrCreateAgentForChat(ctx context.Context, sessionID string, userName string, enabledToolNames []string, thinkingMode bool) (*react.Agent, error) {
+	config, err := m.resolveAgentSessionConfig(ctx, userName, enabledToolNames, thinkingMode)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := buildAgentCacheKey(sessionID, config.ModelName, config.ToolSignature)
 
 	m.mu.RLock()
 	if agent, ok := m.agents[cacheKey]; ok {
@@ -70,122 +132,17 @@ func (m *AgentManager) GetOrCreateAgentWithTools(ctx context.Context, sessionID 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 双重检查
 	if agent, ok := m.agents[cacheKey]; ok {
 		return agent, nil
 	}
 
-	// 创建新 Agent
-	agent, err := m.createAgentWithTools(ctx, userName, toolNames, model, modelName)
+	agent, err := m.buildAgent(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	m.agents[cacheKey] = agent
 	return agent, nil
-}
-
-// createAgentWithTools 创建带指定工具的 React Agent
-func (m *AgentManager) createAgentWithTools(ctx context.Context, userName string, toolNames []string, model eino_model.ToolCallingChatModel, modelName string) (*react.Agent, error) {
-	if model == nil {
-		return nil, fmt.Errorf("llm model not available")
-	}
-
-	// 1. 查询用户已索引的文件 ID
-	fileIDs, err := file.GetIndexedFileIDsByUserName(userName)
-	if err != nil {
-		log.Printf("Warning: failed to get indexed file ids: %v", err)
-		fileIDs = []uint{} // 继续执行，只是没有 RAG 工具
-	}
-
-	// 2. 如果没有指定工具，使用默认工具
-	if len(toolNames) == 0 {
-		toolNames = tools.GetToolRegistry().GetDefaultToolNames()
-	}
-
-	// 3. 从注册表获取工具
-	registry := tools.GetToolRegistry()
-	toolList, err := registry.GetToolsByNames(ctx, toolNames, fileIDs)
-	if err != nil {
-		return nil, fmt.Errorf("get tools failed: %w", err)
-	}
-
-	log.Printf("Creating agent with model=%s, tools=%v", modelName, toolNames)
-
-	// 4. 创建 React Agent
-	agent, err := react.NewAgent(ctx, &react.AgentConfig{
-		ToolCallingModel: model,
-		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: toolList,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create react agent failed: %w", err)
-	}
-
-	return agent, nil
-}
-
-// RecreateAgentWithTools 重新创建带新工具的 Agent
-func (m *AgentManager) RecreateAgentWithTools(ctx context.Context, sessionID string, userName string, toolNames []string, thinkingMode bool) (*react.Agent, error) {
-	client := llm.GetLLMClient()
-	if client == nil {
-		return nil, fmt.Errorf("llm client not initialized")
-	}
-
-	model, modelName, err := client.GetModelForMode(ctx, thinkingMode)
-	if err != nil {
-		return nil, err
-	}
-	cacheKey := buildAgentCacheKey(sessionID, modelName)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// 删除旧 Agent
-	delete(m.agents, cacheKey)
-
-	// 创建新 Agent
-	agent, err := m.createAgentWithTools(ctx, userName, toolNames, model, modelName)
-	if err != nil {
-		return nil, err
-	}
-
-	m.agents[cacheKey] = agent
-	return agent, nil
-}
-
-// Generate 同步生成响应
-func (m *AgentManager) Generate(ctx context.Context, sessionID string, userName string, messages []*schema.Message) (*schema.Message, error) {
-	agent, err := m.GetOrCreateAgent(ctx, sessionID, userName)
-	if err != nil {
-		return nil, err
-	}
-	return agent.Generate(ctx, messages)
-}
-
-// GenerateWithTools 使用指定工具同步生成响应
-func (m *AgentManager) GenerateWithTools(ctx context.Context, sessionID string, userName string, messages []*schema.Message, toolNames []string, thinkingMode bool) (*schema.Message, error) {
-	agent, err := m.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
-	if err != nil {
-		return nil, err
-	}
-	return agent.Generate(ctx, messages)
-}
-
-// OpenStreamWithTools 获取底层流读取器，调用方负责 Close。
-func (m *AgentManager) OpenStreamWithTools(ctx context.Context, sessionID string, userName string, messages []*schema.Message, toolNames []string, thinkingMode bool) (*schema.StreamReader[*schema.Message], error) {
-	agent, err := m.GetOrCreateAgentWithTools(ctx, sessionID, userName, toolNames, thinkingMode)
-	if err != nil {
-		return nil, err
-	}
-
-	stream, err := agent.Stream(ctx, messages)
-	if err != nil {
-		return nil, err
-	}
-
-	return stream, nil
 }
 
 // ClearAgent 清除指定会话的 Agent 缓存

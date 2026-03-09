@@ -4,16 +4,16 @@ import { Actions, Bubble, Think, ThoughtChain } from '@ant-design/x'
 import useStreamContent from '../hooks/useStreamContent'
 import { COLORS, MESSAGE_MAX_WIDTH } from '../config/constants'
 import {
-  buildThoughtChainItems,
+  buildToolTraceItems,
   createMessageActions,
   renderMarkdown,
-  shouldUseToolChain
+  shouldRenderToolTrace
 } from '../utils/helpers.jsx'
 
 const { Text } = Typography
 
-const ToolThoughtChain = ({ record = null, processes = [] }) => {
-  const items = buildThoughtChainItems({ record, processRecords: processes })
+const ToolThoughtChain = ({ record = null, toolTraceRecords = [], toolDisplayNames }) => {
+  const items = buildToolTraceItems({ record, toolTraceRecords, toolDisplayNames })
   if (!items.length) {
     return null
   }
@@ -27,10 +27,10 @@ const ToolThoughtChain = ({ record = null, processes = [] }) => {
   )
 }
 
-const AssistantBubble = ({ record, processes, onActionClick }) => {
+const AssistantBubble = ({ record, toolTraceRecords, toolDisplayNames, onActionClick }) => {
   const message = record.message || {}
   const shouldAnimate = record.renderMode === 'stream' && record.pending
-  const useToolChain = shouldUseToolChain(record, processes)
+  const useToolTrace = shouldRenderToolTrace(record, toolTraceRecords)
   const rawReasoningContent = message.reasoning_content || ''
   const rawAnswerContent = message.content || ''
   const [streamContent, isContentDone] = useStreamContent(rawAnswerContent, {
@@ -47,13 +47,19 @@ const AssistantBubble = ({ record, processes, onActionClick }) => {
   const answerDisplayContent = shouldAnimate && !isContentDone ? streamContent : rawAnswerContent
   const isStreaming = shouldAnimate && !isContentDone
   const showReasoningPlaceholder = Boolean(record.expectReasoning) && shouldAnimate && !rawReasoningContent.trim() && !rawAnswerContent.trim()
-  const showReasoning = !useToolChain && (Boolean(rawReasoningContent) || showReasoningPlaceholder)
+  const showReasoning = !useToolTrace && (Boolean(rawReasoningContent) || showReasoningPlaceholder)
   const showAnswer = Boolean(rawAnswerContent)
   const reasoningLoading = showReasoning && shouldAnimate && !rawAnswerContent.trim()
 
   return (
     <div className="assistant-message">
-      {useToolChain ? <ToolThoughtChain record={record} processes={processes} /> : null}
+      {useToolTrace ? (
+        <ToolThoughtChain
+          record={record}
+          toolTraceRecords={toolTraceRecords}
+          toolDisplayNames={toolDisplayNames}
+        />
+      ) : null}
 
       {showReasoning ? (
         <Think

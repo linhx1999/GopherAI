@@ -20,12 +20,7 @@ import (
 	"GopherAI/model"
 )
 
-// SystemPrompt Agent 系统提示词
-const SystemPrompt = `你是一个智能助手，可以帮助用户解答各种问题。
-
-当你需要查询知识库中的信息时，请使用 knowledge_search 工具进行检索。
-当需要逐步分析复杂问题时，请使用 sequential_thinking 工具。
-请在回答时标注信息来源（如果使用了知识库检索）。
+const baseSystemPrompt = `你是一个智能助手，可以帮助用户解答各种问题。
 
 请用中文回答，保持回答简洁、准确、友好。`
 
@@ -47,9 +42,9 @@ type StreamError struct {
 
 // StreamEvent 表示 controller 可直接写入 SSE 的载荷。
 type StreamEvent struct {
-	Meta    *StreamMeta
-	Message *schema.Message
-	Error   *StreamError
+	Meta  *StreamMeta
+	Chunk *schema.Message
+	Error *StreamError
 }
 
 // StreamHandle 表示一个可被 controller 消费的事件流。
@@ -60,11 +55,11 @@ type StreamHandle struct {
 
 // GenerateRequest 表示一次消息生成请求。
 type GenerateRequest struct {
-	UserName     string
-	SessionID    string
-	UserMessage  string
-	ToolNames    []string
-	ThinkingMode bool
+	UserName         string
+	SessionID        string
+	UserMessage      string
+	EnabledToolNames []string
+	ThinkingMode     bool
 }
 
 // GenerateResult 表示非流式生成结果。
@@ -81,12 +76,12 @@ type HistoryMessageItem struct {
 	CreatedAt string          `json:"created_at"`
 }
 
-type preparedAgentRun struct {
-	sessionID        string
-	userName         string
-	prompt           []*schema.Message
-	outputStartIndex int
-	runner           *react.Agent
+type preparedChatExecution struct {
+	sessionID                  string
+	userName                   string
+	conversation               []*schema.Message
+	firstAssistantMessageIndex int
+	agent                      *react.Agent
 }
 
 func NewErrorEvent(message string) StreamEvent {
@@ -147,11 +142,18 @@ func persistProducedMessages(sessionID string, userName string, startIndex int, 
 	return lastIndex
 }
 
-func buildMessages(history []*model.Message, userMessage *schema.Message) []*schema.Message {
+func buildSystemPrompt(hasEnabledTools bool) string {
+	if hasEnabledTools {
+		return baseSystemPrompt + "\n\n当前对话已启用工具；当工具能提升答案质量时，请先调用合适的工具。若使用知识检索，请在回答中标注信息来源。"
+	}
+	return baseSystemPrompt + "\n\n当前对话未启用工具，请直接基于上下文作答。"
+}
+
+func buildConversationMessages(history []*model.Message, userMessage *schema.Message, hasEnabledTools bool) []*schema.Message {
 	messages := make([]*schema.Message, 0, len(history)+2)
 	messages = append(messages, &schema.Message{
 		Role:    schema.System,
-		Content: SystemPrompt,
+		Content: buildSystemPrompt(hasEnabledTools),
 	})
 
 	for _, m := range history {
@@ -237,7 +239,7 @@ func createSession(userName string, title string) (string, code.Code) {
 	return createdSession.ID, code.CodeSuccess
 }
 
-func prepareAgentRun(ctx context.Context, req GenerateRequest) (*preparedAgentRun, code.Code) {
+func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedChatExecution, code.Code) {
 	sessionID := req.SessionID
 	if sessionID == "" {
 		var code_ code.Code
@@ -253,7 +255,7 @@ func prepareAgentRun(ctx context.Context, req GenerateRequest) (*preparedAgentRu
 
 	history, err := getSessionHistory(sessionID, req.UserName)
 	if err != nil {
-		log.Println("prepareAgentRun getSessionHistory error:", err)
+		log.Println("prepareChatExecution getSessionHistory error:", err)
 		return nil, code.CodeServerBusy
 	}
 
@@ -261,29 +263,31 @@ func prepareAgentRun(ctx context.Context, req GenerateRequest) (*preparedAgentRu
 	userMessage := schema.UserMessage(req.UserMessage)
 	persistMessage(buildStoredMessage(sessionID, req.UserName, userMessageIndex, userMessage))
 
-	runner, err := agentcommon.GetAgentManager().GetOrCreateAgentWithTools(ctx, sessionID, req.UserName, req.ToolNames, req.ThinkingMode)
+	agent, err := agentcommon.GetAgentManager().GetOrCreateAgentForChat(ctx, sessionID, req.UserName, req.EnabledToolNames, req.ThinkingMode)
 	if err != nil {
-		log.Println("prepareAgentRun GetOrCreateAgentWithTools error:", err)
+		log.Println("prepareChatExecution GetOrCreateAgentForChat error:", err)
 		return nil, code.AIModelFail
 	}
 
-	return &preparedAgentRun{
-		sessionID:        sessionID,
-		userName:         req.UserName,
-		prompt:           buildMessages(history, userMessage),
-		outputStartIndex: userMessageIndex + 1,
-		runner:           runner,
+	hasEnabledTools := len(req.EnabledToolNames) > 0
+
+	return &preparedChatExecution{
+		sessionID:                  sessionID,
+		userName:                   req.UserName,
+		conversation:               buildConversationMessages(history, userMessage, hasEnabledTools),
+		firstAssistantMessageIndex: userMessageIndex + 1,
+		agent:                      agent,
 	}, code.CodeSuccess
 }
 
 // Generate 同步生成响应。
 func Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, code.Code) {
-	run, code_ := prepareAgentRun(ctx, req)
+	run, code_ := prepareChatExecution(ctx, req)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
 
-	produced, finalMessage, err := agentcommon.GenerateProducedMessages(ctx, run.runner, run.prompt)
+	produced, finalMessage, err := agentcommon.CollectAgentMessages(ctx, run.agent, run.conversation)
 	if err != nil {
 		log.Println("Generate error:", err)
 		return nil, code.AIModelFail
@@ -292,15 +296,15 @@ func Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, code.C
 		produced = append(produced, finalMessage)
 	}
 
-	lastIndex := persistProducedMessages(run.sessionID, run.userName, run.outputStartIndex, produced)
+	lastIndex := persistProducedMessages(run.sessionID, run.userName, run.firstAssistantMessageIndex, produced)
 	if finalMessage == nil && len(produced) > 0 {
 		finalMessage = produced[len(produced)-1]
 	}
 	if finalMessage == nil {
 		finalMessage = &schema.Message{Role: schema.Assistant}
 	}
-	if lastIndex < run.outputStartIndex {
-		lastIndex = run.outputStartIndex - 1
+	if lastIndex < run.firstAssistantMessageIndex {
+		lastIndex = run.firstAssistantMessageIndex - 1
 	}
 
 	return &GenerateResult{
@@ -312,7 +316,7 @@ func Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, code.C
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
 func Stream(ctx context.Context, req GenerateRequest) (*StreamHandle, code.Code) {
-	run, code_ := prepareAgentRun(ctx, req)
+	run, code_ := prepareChatExecution(ctx, req)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -325,25 +329,25 @@ func Stream(ctx context.Context, req GenerateRequest) (*StreamHandle, code.Code)
 			Meta: &StreamMeta{
 				Type:         StreamPayloadTypeMeta,
 				SessionID:    run.sessionID,
-				MessageIndex: run.outputStartIndex,
+				MessageIndex: run.firstAssistantMessageIndex,
 			},
 		}); err != nil {
 			return
 		}
 
-		produced, err := agentcommon.StreamProducedMessages(ctx, run.runner, run.prompt, func(msg *schema.Message) error {
-			return emitEvent(ctx, events, StreamEvent{Message: msg})
+		produced, err := agentcommon.StreamAgentMessages(ctx, run.agent, run.conversation, func(msg *schema.Message) error {
+			return emitEvent(ctx, events, StreamEvent{Chunk: msg})
 		})
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Println("Stream StreamProducedMessages error:", err)
+			log.Println("Stream StreamAgentMessages error:", err)
 			_ = emitEvent(ctx, events, NewErrorEvent("agent stream failed"))
 			return
 		}
 
-		persistProducedMessages(run.sessionID, run.userName, run.outputStartIndex, produced)
+		persistProducedMessages(run.sessionID, run.userName, run.firstAssistantMessageIndex, produced)
 	}()
 
 	return &StreamHandle{

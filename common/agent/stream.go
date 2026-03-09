@@ -10,8 +10,8 @@ import (
 
 type MessageSink func(*schema.Message) error
 
-// GenerateProducedMessages 执行同步生成，并返回 Agent 过程中的完整产出消息。
-func GenerateProducedMessages(ctx context.Context, runner *react.Agent, input []*schema.Message) ([]*schema.Message, *schema.Message, error) {
+// CollectAgentMessages 执行同步生成，并返回 Agent 过程中的完整产出消息。
+func CollectAgentMessages(ctx context.Context, runner *react.Agent, input []*schema.Message) ([]*schema.Message, *schema.Message, error) {
 	opt, future := react.WithMessageFuture()
 
 	resp, err := runner.Generate(ctx, input, opt)
@@ -35,8 +35,8 @@ func GenerateProducedMessages(ctx context.Context, runner *react.Agent, input []
 	return produced, resp, nil
 }
 
-// StreamProducedMessages 执行流式生成，并按原始 chunk 顺序输出 schema.Message。
-func StreamProducedMessages(ctx context.Context, runner *react.Agent, input []*schema.Message, sink MessageSink) ([]*schema.Message, error) {
+// StreamAgentMessages 执行流式生成，并按原始 chunk 顺序输出 schema.Message。
+func StreamAgentMessages(ctx context.Context, runner *react.Agent, input []*schema.Message, sink MessageSink) ([]*schema.Message, error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -61,7 +61,7 @@ func StreamProducedMessages(ctx context.Context, runner *react.Agent, input []*s
 			break
 		}
 
-		full, err := consumeOneProducedStream(sr, sink)
+		full, err := collectStreamMessage(sr, sink)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +76,7 @@ func StreamProducedMessages(ctx context.Context, runner *react.Agent, input []*s
 	return produced, nil
 }
 
-func consumeOneProducedStream(sr *schema.StreamReader[*schema.Message], sink MessageSink) (*schema.Message, error) {
+func collectStreamMessage(sr *schema.StreamReader[*schema.Message], sink MessageSink) (*schema.Message, error) {
 	defer sr.Close()
 
 	chunks := make([]*schema.Message, 0, 8)

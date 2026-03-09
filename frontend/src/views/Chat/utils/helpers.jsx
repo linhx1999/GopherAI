@@ -4,8 +4,7 @@ import XMarkdown from '@ant-design/x-markdown'
 import {
   ASSISTANT_DISPLAY_MODES,
   COLORS,
-  MESSAGE_MAX_WIDTH,
-  TOOL_OPTIONS
+  MESSAGE_MAX_WIDTH
 } from '../config/constants'
 
 const { Text } = Typography
@@ -29,10 +28,11 @@ export const createMessageActions = (isUser) => {
 // Markdown 渲染
 export const renderMarkdown = (content) => <XMarkdown content={content} />
 
-const TOOL_LABELS = TOOL_OPTIONS.reduce((labels, option) => {
-  labels[option.value] = option.label
-  return labels
-}, {})
+const DEFAULT_TOOL_DISPLAY_NAMES = {
+  knowledge_search: '知识库检索',
+  sequential_thinking: '逐步思考',
+  get_weather: '天气查询'
+}
 
 // Role 配置
 export const createRoleConfig = () => ({
@@ -103,6 +103,12 @@ export const isSchemaMessagePayload = (data) => Boolean(data?.role)
 
 export const isMessageFinished = (message) => Boolean(message?.response_meta?.finish_reason)
 
+export const normalizeEnabledToolNames = (toolNames) => (
+  Array.isArray(toolNames)
+    ? [...new Set(toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean))].sort()
+    : []
+)
+
 export const formatToolArguments = (argumentsText) => {
   if (!argumentsText) return ''
   try {
@@ -112,51 +118,61 @@ export const formatToolArguments = (argumentsText) => {
   }
 }
 
-const normalizeToolNames = (toolNames) => (
-  Array.isArray(toolNames)
-    ? toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean)
-    : []
+export const createToolDisplayNameMap = (toolCatalog = []) => {
+  const labels = { ...DEFAULT_TOOL_DISPLAY_NAMES }
+
+  toolCatalog.forEach((tool) => {
+    const name = String(tool?.name || '').trim()
+    if (!name) {
+      return
+    }
+    labels[name] = tool.displayName || tool.display_name || labels[name] || name
+  })
+
+  return labels
+}
+
+export const getToolDisplayName = (toolName, toolDisplayNames = DEFAULT_TOOL_DISPLAY_NAMES) => (
+  toolDisplayNames[toolName] || DEFAULT_TOOL_DISPLAY_NAMES[toolName] || toolName || '工具'
 )
 
-export const getToolLabel = (toolName) => TOOL_LABELS[toolName] || toolName || '工具'
-
-const isProcessMessage = (message = {}) => {
+const isToolTraceMessage = (message = {}) => {
   if (message.role === 'tool') return true
   if (message.role !== 'assistant') return false
   const hasVisibleAnswer = Boolean(message.content || message.reasoning_content)
   return !hasVisibleAnswer && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
 }
 
-export const hasToolExecution = (processRecords = []) => processRecords.some((record) => {
+export const hasToolActivity = (toolTraceRecords = []) => toolTraceRecords.some((record) => {
   const message = record.message || {}
   return message.role === 'tool' || (Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
 })
 
-export const shouldUseToolChain = (record, processRecords = []) => {
+export const shouldRenderToolTrace = (record, toolTraceRecords = []) => {
   if (!record || record.message?.role !== 'assistant') {
     return false
   }
 
-  if (record.displayMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
+  if (record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
     return true
   }
 
-  return hasToolExecution(processRecords)
+  return hasToolActivity(toolTraceRecords)
 }
 
-const buildPlanningItem = ({ record, hasExecution }) => {
-  if (!record?.displayMode && !hasExecution) {
+const buildPlanningItem = ({ record, hasExecution, toolDisplayNames }) => {
+  if (!record?.assistantRenderMode && !hasExecution) {
     return null
   }
 
-  const selectedToolNames = normalizeToolNames(record?.selectedToolNames)
+  const enabledToolNames = normalizeEnabledToolNames(record?.enabledToolNames)
   const isPending = Boolean(record?.pending) && !hasExecution
-  const description = selectedToolNames.length > 0
-    ? `已启用：${selectedToolNames.map(getToolLabel).join('、')}`
+  const description = enabledToolNames.length > 0
+    ? `已启用：${enabledToolNames.map((toolName) => getToolDisplayName(toolName, toolDisplayNames)).join('、')}`
     : (hasExecution ? '已进入工具执行链路' : '工具规划中')
 
   return {
-    key: `${record?.key || 'tool-chain'}-plan`,
+    key: `${record?.key || 'tool-trace'}-plan`,
     title: '工具规划',
     description,
     status: isPending ? 'loading' : 'success',
@@ -164,7 +180,7 @@ const buildPlanningItem = ({ record, hasExecution }) => {
   }
 }
 
-const buildToolCallItems = (processRecords = []) => processRecords.flatMap((record) => {
+const buildToolCallItems = (toolTraceRecords = [], toolDisplayNames) => toolTraceRecords.flatMap((record) => {
   const message = record.message || {}
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
 
@@ -174,7 +190,7 @@ const buildToolCallItems = (processRecords = []) => processRecords.flatMap((reco
 
     return {
       key: `${record.key}-call-${call.id || call.index || index}`,
-      title: `调用 ${getToolLabel(toolName)}`,
+      title: `调用 ${getToolDisplayName(toolName, toolDisplayNames)}`,
       description: formattedArguments ? '参数已准备' : '等待工具执行',
       content: formattedArguments ? (
         <pre className="thought-chain-code-block">{formattedArguments}</pre>
@@ -186,7 +202,7 @@ const buildToolCallItems = (processRecords = []) => processRecords.flatMap((reco
   })
 })
 
-const buildToolResultItems = (processRecords = []) => processRecords.flatMap((record, index) => {
+const buildToolResultItems = (toolTraceRecords = [], toolDisplayNames) => toolTraceRecords.flatMap((record, index) => {
   const message = record.message || {}
   if (message.role !== 'tool') {
     return []
@@ -197,7 +213,7 @@ const buildToolResultItems = (processRecords = []) => processRecords.flatMap((re
 
   return [{
     key: `${record.key}-result`,
-    title: `${getToolLabel(toolName)} 执行结果`,
+    title: `${getToolDisplayName(toolName, toolDisplayNames)} 执行结果`,
     description: content ? '工具返回了可展示内容' : '工具已完成执行',
     content: content ? (
       <div className="thought-chain-markdown">
@@ -228,11 +244,11 @@ const buildAnswerItem = ({ record, hasExecution }) => {
   }
 }
 
-export const buildThoughtChainItems = ({ record = null, processRecords = [] }) => {
-  const hasExecution = hasToolExecution(processRecords)
-  const planningItem = buildPlanningItem({ record, hasExecution })
-  const toolCallItems = buildToolCallItems(processRecords)
-  const toolResultItems = buildToolResultItems(processRecords)
+export const buildToolTraceItems = ({ record = null, toolTraceRecords = [], toolDisplayNames = DEFAULT_TOOL_DISPLAY_NAMES }) => {
+  const hasExecution = hasToolActivity(toolTraceRecords)
+  const planningItem = buildPlanningItem({ record, hasExecution, toolDisplayNames })
+  const toolCallItems = buildToolCallItems(toolTraceRecords, toolDisplayNames)
+  const toolResultItems = buildToolResultItems(toolTraceRecords, toolDisplayNames)
   const answerItem = buildAnswerItem({ record, hasExecution })
 
   return [
@@ -245,22 +261,22 @@ export const buildThoughtChainItems = ({ record = null, processRecords = [] }) =
 
 export const buildDisplayMessages = (records) => {
   const display = []
-  let processBuffer = []
+  let toolTraceBuffer = []
 
   records.forEach((record) => {
     const message = record.message || {}
 
     if (message.role === 'user' || message.role === 'system') {
-      if (processBuffer.length > 0) {
-        display.push({ type: 'process', key: `process-${processBuffer[0].key}`, processes: processBuffer })
-        processBuffer = []
+      if (toolTraceBuffer.length > 0) {
+        display.push({ type: 'tool_trace', key: `tool-trace-${toolTraceBuffer[0].key}`, toolTraceRecords: toolTraceBuffer })
+        toolTraceBuffer = []
       }
       display.push({ type: message.role, key: record.key, record })
       return
     }
 
-    if (isProcessMessage(message)) {
-      processBuffer.push(record)
+    if (isToolTraceMessage(message)) {
+      toolTraceBuffer.push(record)
       return
     }
 
@@ -269,17 +285,17 @@ export const buildDisplayMessages = (records) => {
         type: 'assistant',
         key: record.key,
         record,
-        processes: processBuffer
+        toolTraceRecords: toolTraceBuffer
       })
-      processBuffer = []
+      toolTraceBuffer = []
       return
     }
 
-    processBuffer.push(record)
+    toolTraceBuffer.push(record)
   })
 
-  if (processBuffer.length > 0) {
-    display.push({ type: 'process', key: `process-${processBuffer[0].key}`, processes: processBuffer })
+  if (toolTraceBuffer.length > 0) {
+    display.push({ type: 'tool_trace', key: `tool-trace-${toolTraceBuffer[0].key}`, toolTraceRecords: toolTraceBuffer })
   }
 
   return display
