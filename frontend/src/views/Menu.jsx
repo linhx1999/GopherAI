@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Layout, Card, Button, Modal, App } from 'antd'
-import { MessageOutlined, CameraOutlined, FolderOutlined, LogoutOutlined } from '@ant-design/icons'
+import { MessageOutlined, FolderOutlined, LogoutOutlined } from '@ant-design/icons'
 import './Menu.css'
 
 const { Header, Content } = Layout
@@ -30,13 +30,6 @@ const Menu = () => {
       description: '与AI进行智能对话',
       icon: <MessageOutlined style={{ fontSize: 48, color: '#1677ff' }} />,
       path: '/chat'
-    },
-    {
-      key: 'image-recognition',
-      title: '图像识别',
-      description: '上传图片进行AI识别',
-      icon: <CameraOutlined style={{ fontSize: 48, color: '#52c41a' }} />,
-      path: '/image-recognition'
     },
     {
       key: 'file-manager',

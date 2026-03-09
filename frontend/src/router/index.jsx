@@ -3,7 +3,6 @@ import Login from '../views/Login'
 import Register from '../views/Register'
 import Menu from '../views/Menu'
 import Chat from '../views/Chat'
-import ImageRecognition from '../views/ImageRecognition'
 import FileManager from '../views/FileManager'
 import PrivateRoute from '../components/PrivateRoute'
 import PublicRoute from '../components/PublicRoute'
@@ -36,10 +35,6 @@ const router = createBrowserRouter([
       {
         path: '/chat',
         element: <Chat />
-      },
-      {
-        path: '/image-recognition',
-        element: <ImageRecognition />
       },
       {
         path: '/file-manager',

@@ -25,10 +25,6 @@ func InitRouter() *gin.Engine {
 		// GET /api/v1/agent/:session_id/messages - 获取消息列表
 		SetupAgentRoutes(auth)
 
-		// 图片相关接口
-		ImageGroup := auth.Group("/image")
-		ImageRouter(ImageGroup)
-
 		// 文件相关接口
 		FileGroup := auth.Group("/file")
 		FileRouter(FileGroup)

@@ -1,6 +1,6 @@
 # GopherAI
 
-一个基于 Go 语言开发的 AI 助手平台，提供多模型 AI 对话、图像识别、语音合成、RAG 知识库检索等功能。
+一个基于 Go 语言开发的 AI 助手平台，提供多模型 AI 对话、语音合成、RAG 知识库检索等功能。
 
 ## 功能特性
 
@@ -21,7 +21,6 @@
   - 文件和索引删除
   - 前端采用与聊天页一致的工作台式布局和组件拆分
 - **MCP 工具调用** - 支持 Model Context Protocol，扩展 AI 能力
-- **图像识别** - 上传图片进行 AI 分析识别
 - **语音合成 (TTS)** - 将文本转换为语音输出
 - **用户认证** - JWT 身份验证，安全的会话管理
 
@@ -171,7 +170,6 @@ pnpm dev
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/v1/image/recognize` | 图像识别 |
 | POST | `/api/v1/file/upload` | 上传文件 |
 | GET | `/api/v1/file/list` | 获取文件列表 |
 | GET | `/api/v1/file/url/:id` | 获取文件访问 URL |
@@ -200,7 +198,6 @@ GopherAI/
 ├── service/             # 业务逻辑层
 │   ├── user/
 │   ├── session/
-│   ├── image/
 │   ├── file/
 │   └── rag/             # RAG 索引服务
 ├── controller/          # 控制器层
@@ -222,7 +219,6 @@ GopherAI/
         │   ├── Login.jsx
         │   ├── Register.jsx
         │   ├── Menu.jsx
-        │   └── ImageRecognition.jsx
         ├── router/      # 前端路由
         └── utils/api.js # API 封装
 ```

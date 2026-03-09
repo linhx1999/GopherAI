@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-GopherAI 是一个基于 Go 语言开发的 AI 助手平台，提供多模型 AI 对话、图像识别、语音合成、RAG 知识库检索等功能。项目采用前后端分离架构，后端使用 Gin 框架，前端使用 React 19 + Ant Design 6。
+GopherAI 是一个基于 Go 语言开发的 AI 助手平台，提供多模型 AI 对话、语音合成、RAG 知识库检索等功能。项目采用前后端分离架构，后端使用 Gin 框架，前端使用 React 19 + Ant Design 6。
 
 ### 技术栈
 
@@ -58,20 +58,17 @@ GopherAI/
 ├── service/                # 业务逻辑层
 │   ├── user/
 │   ├── session/
-│   ├── image/
 │   ├── file/
 │   └── rag/                # RAG 索引服务
 ├── controller/             # 控制器层 (HTTP Handler)
 │   ├── common.go           # 统一响应结构
 │   ├── user/
 │   ├── session/
-│   ├── image/
 │   ├── file/
 │   └── tts/
 ├── router/                 # 路由注册
 │   ├── router.go           # 路由初始化
 │   ├── agent.go            # Agent 相关路由（generate / stream）
-│   ├── Image.go            # 图像相关路由
 │   ├── File.go             # 文件相关路由
 │   └── user.go             # 用户相关路由
 ├── middleware/             # 中间件
@@ -90,7 +87,6 @@ GopherAI/
 │   │   └── postgres.go     # PostgreSQL 连接、迁移、向量索引
 │   ├── redis/              # Redis 初始化（仅用于验证码缓存）
 │   ├── rabbitmq/           # RabbitMQ 消息队列
-│   ├── image/              # 图像识别
 │   ├── email/              # 邮件服务
 │   └── tts/                # 语音合成服务
 ├── utils/                  # 工具函数
@@ -113,7 +109,6 @@ GopherAI/
         │   ├── Login.jsx
         │   ├── Register.jsx
         │   ├── Menu.jsx
-        │   └── ImageRecognition.jsx
         ├── router/         # 前端路由
         └── utils/api.js    # API 封装
 ```
@@ -266,11 +261,6 @@ MCP Server → 注册工具 → HTTP SSE 接口 → MCP Client 连接 → 工具
 | GET | `/api/v1/sessions` | 获取当前用户会话列表 |
 | DELETE | `/api/v1/sessions/:id` | 删除会话 |
 | PUT | `/api/v1/sessions/:id/title` | 更新会话标题 |
-
-**图像识别**:
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/v1/image/recognize` | 图像识别 |
 
 **文件管理**:
 | 方法 | 路径 | 说明 |
@@ -552,7 +542,6 @@ type Response struct {
 | `/register` | Register.jsx | 注册页 |
 | `/menu` | Menu.jsx | 主菜单 |
 | `/ai-chat` | AIChat/index.jsx | AI 对话界面 |
-| `/image-recognition` | ImageRecognition.jsx | 图像识别界面 |
 | `/file-manager` | FileManager/index.jsx | 文件管理界面 |
 
 ### 前端架构
