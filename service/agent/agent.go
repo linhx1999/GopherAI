@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/flow/agent/react"
@@ -182,6 +183,23 @@ func emitEvent(ctx context.Context, events chan<- StreamEvent, event StreamEvent
 	}
 }
 
+func isRequestCanceled(ctx context.Context, err error) bool {
+	if ctx != nil {
+		if ctxErr := ctx.Err(); errors.Is(ctxErr, context.Canceled) || errors.Is(ctxErr, context.DeadlineExceeded) {
+			return true
+		}
+	}
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, "context canceled") || strings.Contains(errText, "context deadline exceeded")
+}
+
 func checkOwnedSession(sessionID string, userName string) (*model.Session, code.Code) {
 	session, err := sessionDAO.GetSessionByIDAndUserName(sessionID, userName)
 	if err == nil {
@@ -308,6 +326,10 @@ func Generate(ctx context.Context, userName, sessionID, userMessage string, enab
 
 	produced, finalMessage, err := agentcommon.CollectAgentMessages(ctx, run.agent, run.conversation)
 	if err != nil {
+		if isRequestCanceled(ctx, err) {
+			log.Printf("Generate canceled: %v", err)
+			return nil, code.CodeServerBusy
+		}
 		log.Println("Generate error:", err)
 		return nil, code.AIModelFail
 	}
@@ -364,7 +386,8 @@ func Stream(ctx context.Context, userName, sessionID, userMessage string, enable
 			return emitEvent(ctx, events, StreamEvent{Chunk: msg})
 		})
 		if err != nil {
-			if ctx.Err() != nil {
+			if isRequestCanceled(ctx, err) {
+				log.Printf("Stream canceled: %v", err)
 				return
 			}
 			log.Println("Stream StreamAgentMessages error:", err)

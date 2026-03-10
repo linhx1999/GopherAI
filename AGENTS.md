@@ -104,6 +104,7 @@ GopherAI/
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，以兼容“Redis 同步写、PostgreSQL 异步落库”的消息链路
 - Redis 访问通过领域 DAO 收口；service 负责缓存策略，不直接调用 `common/redis` 的业务函数
 - 前端在收到流式 `meta.session_id` 或非流式响应里的 `session_id` 后，必须立刻把当前聊天上下文绑定到该真实会话，避免后续多轮对话重复创建会话
+- 若 HTTP 请求上下文已取消，service/controller 应将其视为请求中断并停止写回，避免把客户端断开误记为模型失败
 
 消息模型关键字段：
 

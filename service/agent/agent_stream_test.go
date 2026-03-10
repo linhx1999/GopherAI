@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -88,5 +89,28 @@ func TestBuildHistoryMessageItemsPreservesReasoningContent(t *testing.T) {
 	}
 	if items[0].CreatedAt != "2026-03-10T09:00:00Z" {
 		t.Fatalf("unexpected created_at: %q", items[0].CreatedAt)
+	}
+}
+
+func TestIsRequestCanceledDetectsContextError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if !isRequestCanceled(ctx, nil) {
+		t.Fatal("expected canceled context to be detected")
+	}
+}
+
+func TestIsRequestCanceledDetectsWrappedCancellationError(t *testing.T) {
+	err := fmt.Errorf("llm generate failed: %w", context.Canceled)
+	if !isRequestCanceled(context.Background(), err) {
+		t.Fatal("expected wrapped cancellation error to be detected")
+	}
+}
+
+func TestIsRequestCanceledDetectsCancellationText(t *testing.T) {
+	err := errors.New("[NodeRunError] failed to create chat completion: Post \"https://example.com\": context canceled")
+	if !isRequestCanceled(context.Background(), err) {
+		t.Fatal("expected cancellation text to be detected")
 	}
 }

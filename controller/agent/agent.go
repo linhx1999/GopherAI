@@ -41,7 +41,13 @@ func GenerateHandler(c *gin.Context) {
 		req.ThinkingMode,
 	)
 	if code_ != code.CodeSuccess {
+		if c.Request.Context().Err() != nil {
+			return
+		}
 		writeCodeResponse(c, code_)
+		return
+	}
+	if c.Request.Context().Err() != nil {
 		return
 	}
 

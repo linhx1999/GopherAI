@@ -99,7 +99,7 @@ func TestStreamHandlerReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	if !strings.Contains(body, `"type":"error"`) {
 		t.Fatalf("expected error payload, got %q", body)
 	}
-	if !strings.Contains(body, `"message":"message is required"`) {
+	if !strings.Contains(body, `"message":"Key: 'ChatRequest.Message' Error:Field validation for 'Message' failed on the 'required' tag"`) {
 		t.Fatalf("expected validation error message, got %q", body)
 	}
 	if !strings.Contains(body, "data:[DONE]") {
