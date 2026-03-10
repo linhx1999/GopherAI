@@ -103,6 +103,7 @@ GopherAI/
 - Redis 与 RabbitMQ 载荷都保留 `index`、`payload`、`tool_calls`
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，以兼容“Redis 同步写、PostgreSQL 异步落库”的消息链路
 - Redis 访问通过领域 DAO 收口；service 负责缓存策略，不直接调用 `common/redis` 的业务函数
+- 前端在收到流式 `meta.session_id` 或非流式响应里的 `session_id` 后，必须立刻把当前聊天上下文绑定到该真实会话，避免后续多轮对话重复创建会话
 
 消息模型关键字段：
 
@@ -123,6 +124,7 @@ type Message struct {
 - 未启用工具时，`reasoning_content` 使用 `Think` 展示
 - 启用工具后，前端将 `assistant(tool_calls)`、`tool`、最终 `assistant` 重建为 `ThoughtChain`
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
+- 首轮请求若未携带 `session_id`，前端在拿到服务端返回的真实会话 ID 后要立即更新 `activeKey`，保证后续续聊复用同一会话
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
 
 ### 4. RAG 与文件流程

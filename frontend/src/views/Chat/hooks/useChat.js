@@ -86,6 +86,8 @@ const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
   const latestHistorySessionRef = useRef(null)
+  const activeKeyRef = useRef(null)
+  const isTempSessionRef = useRef(false)
   const { availableTools } = useToolCatalog()
 
   const [enabledToolNames, setEnabledToolNames] = useState([])
@@ -120,6 +122,14 @@ const useChat = () => {
   useEffect(() => {
     loadSessions()
   }, [loadSessions])
+
+  useEffect(() => {
+    activeKeyRef.current = activeKey
+  }, [activeKey])
+
+  useEffect(() => {
+    isTempSessionRef.current = isTempSession
+  }, [isTempSession])
 
   useEffect(() => {
     if (availableTools.length === 0) {
@@ -268,19 +278,40 @@ const useChat = () => {
     }
   }, [sessions, shareSession, deleteSession])
 
-  const handleSessionCreated = useCallback((sessionId) => {
+  const bindServerSession = useCallback((sessionId) => {
     const newSid = String(sessionId)
-    if (isTempSession) {
-      setSessions((prev) => prev.map((s) => (
-        s.id === SPECIAL_SESSIONS.TEMP ? { ...s, id: newSid } : s
-      )))
+    const shouldBindActiveSession = !activeKeyRef.current || isTempSessionRef.current
+
+    setSessions((prev) => {
+      const nextSessions = prev.map((session) => (
+        shouldBindActiveSession && session.id === SPECIAL_SESSIONS.TEMP
+          ? { ...session, id: newSid }
+          : session
+      ))
+
+      if (nextSessions.some((session) => session.id === newSid)) {
+        return nextSessions
+      }
+
+      if (!shouldBindActiveSession) {
+        return prev
+      }
+
+      return [{
+        id: newSid,
+        title: `会话 ${newSid}`,
+        createdAt: new Date().toISOString()
+      }, ...nextSessions]
+    })
+
+    if (shouldBindActiveSession) {
       setActiveKey(newSid)
       setIsTempSession(false)
-      latestHistorySessionRef.current = newSid
-    } else if (!sessions.some((s) => s.id === newSid)) {
-      loadSessions()
     }
-  }, [isTempSession, sessions, loadSessions])
+
+    latestHistorySessionRef.current = newSid
+    loadSessions()
+  }, [loadSessions])
 
   const buildChatRunOptions = useCallback(() => ({
     enabledToolNames: normalizeEnabledToolNames(enabledToolNames),
@@ -397,7 +428,7 @@ const useChat = () => {
           const payload = parsed.data
           if (payload?.type === SSE_EVENT_TYPES.META) {
             if (payload.session_id) {
-              handleSessionCreated(String(payload.session_id))
+              bindServerSession(String(payload.session_id))
             }
             if (typeof payload.message_index === 'number') {
               nextMessageIndex = payload.message_index
@@ -430,7 +461,7 @@ const useChat = () => {
       finalizeStream()
       message.error('流式传输出错: ' + err.message)
     }
-  }, [buildChatRequest, handleSessionCreated, message])
+  }, [bindServerSession, buildChatRequest, message])
 
   const sendGenerateMessage = useCallback(async (question, runOptions) => {
     const payload = buildChatRequest(question, runOptions)
@@ -442,7 +473,7 @@ const useChat = () => {
         const data = response.data?.data || {}
         let historyRecords = []
         if (data.session_id) {
-          handleSessionCreated(String(data.session_id))
+          bindServerSession(String(data.session_id))
           historyRecords = await loadMessages(String(data.session_id))
         } else if (activeKey && !isTempSession) {
           historyRecords = await loadMessages(activeKey)
@@ -481,7 +512,7 @@ const useChat = () => {
     } finally {
       setIsLoading(false)
     }
-  }, [activeKey, buildChatRequest, handleSessionCreated, isTempSession, loadMessages, message])
+  }, [activeKey, bindServerSession, buildChatRequest, isTempSession, loadMessages, message])
 
   const handleAttachmentUpload = useCallback(async (file) => {
     const formData = new FormData()
