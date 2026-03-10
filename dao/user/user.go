@@ -2,10 +2,14 @@ package user
 
 import (
 	"GopherAI/common/postgres"
+	redis_cache "GopherAI/common/redis"
 	"GopherAI/model"
 	"GopherAI/utils"
 	"context"
+	"strings"
+	"time"
 
+	redisCli "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -39,4 +43,30 @@ func Register(username, email, password string) (*model.User, bool) {
 	} else {
 		return user, true
 	}
+}
+
+// StoreEmailCaptcha 写入邮箱验证码缓存。
+func StoreEmailCaptcha(email, captcha string) error {
+	key := redis_cache.GenerateCaptcha(email)
+	return redis_cache.Rdb.Set(ctx, key, captcha, 2*time.Minute).Err()
+}
+
+// VerifyEmailCaptcha 验证邮箱验证码，成功后消费缓存。
+func VerifyEmailCaptcha(email, userInput string) (bool, error) {
+	key := redis_cache.GenerateCaptcha(email)
+
+	storedCaptcha, err := redis_cache.Rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err == redisCli.Nil {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if strings.EqualFold(storedCaptcha, userInput) {
+		_ = redis_cache.Rdb.Del(ctx, key).Err()
+		return true, nil
+	}
+
+	return false, nil
 }

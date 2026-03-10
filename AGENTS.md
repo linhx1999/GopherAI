@@ -102,6 +102,7 @@ GopherAI/
 - 流结束追加 `data: [DONE]`
 - Redis 与 RabbitMQ 载荷都保留 `index`、`payload`、`tool_calls`
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，以兼容“Redis 同步写、PostgreSQL 异步落库”的消息链路
+- Redis 访问通过领域 DAO 收口；service 负责缓存策略，不直接调用 `common/redis` 的业务函数
 
 消息模型关键字段：
 
@@ -220,8 +221,8 @@ pnpm lint
 ### 分层约定
 
 1. Controller：HTTP 请求和参数校验
-2. Service：业务逻辑
-3. DAO：数据库操作
+2. Service：业务逻辑与缓存策略决策
+3. DAO：数据访问，包含 PostgreSQL 与 Redis 的领域化读写
 
 ### 响应结构
 

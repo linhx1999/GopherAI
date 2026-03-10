@@ -2,8 +2,17 @@ package message
 
 import (
 	"GopherAI/common/postgres"
+	"GopherAI/common/redis"
+	"GopherAI/config"
 	"GopherAI/model"
+	"context"
+	"encoding/json"
+	"time"
+
+	redisCli "github.com/redis/go-redis/v9"
 )
+
+var ctx = context.Background()
 
 // CreateMessage 创建消息
 func CreateMessage(message *model.Message) (*model.Message, error) {
@@ -61,4 +70,64 @@ func GetMessageByIndex(sessionID string, index int) (*model.Message, error) {
 		return nil, err
 	}
 	return &msg, nil
+}
+
+// GetCachedMessages 获取会话消息缓存。
+func GetCachedMessages(sessionID string) ([]*model.Message, error) {
+	key := redis.GenerateMessageKey(sessionID)
+
+	data, err := redis.Rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err == redisCli.Nil {
+			return []*model.Message{}, nil
+		}
+		return nil, err
+	}
+
+	var messages []*model.Message
+	if err := json.Unmarshal([]byte(data), &messages); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+// StoreCachedMessages 覆盖写入会话消息缓存。
+func StoreCachedMessages(sessionID string, messages []*model.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return err
+	}
+
+	key := redis.GenerateMessageKey(sessionID)
+	ttl := time.Duration(config.DefaultRedisKeyConfig.MessageTTL) * time.Hour
+	return redis.Rdb.Set(ctx, key, data, ttl).Err()
+}
+
+// AppendCachedMessage 追加一条消息到会话缓存。
+func AppendCachedMessage(sessionID string, msg *model.Message) error {
+	messages, err := GetCachedMessages(sessionID)
+	if err != nil {
+		return err
+	}
+
+	messages = append(messages, msg)
+	return StoreCachedMessages(sessionID, messages)
+}
+
+// DeleteCachedMessages 删除会话消息缓存。
+func DeleteCachedMessages(sessionID string) error {
+	key := redis.GenerateMessageKey(sessionID)
+	return redis.Rdb.Del(ctx, key).Err()
+}
+
+// RefreshCachedMessagesTTL 刷新会话消息缓存的过期时间。
+func RefreshCachedMessagesTTL(sessionID string) error {
+	key := redis.GenerateMessageKey(sessionID)
+	ttl := time.Duration(config.DefaultRedisKeyConfig.MessageTTL) * time.Hour
+	return redis.Rdb.Expire(ctx, key, ttl).Err()
 }

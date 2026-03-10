@@ -14,7 +14,6 @@ import (
 	agentcommon "GopherAI/common/agent"
 	"GopherAI/common/code"
 	"GopherAI/common/rabbitmq"
-	redis_cache "GopherAI/common/redis"
 	messageDAO "GopherAI/dao/message"
 	sessionDAO "GopherAI/dao/session"
 	"GopherAI/model"
@@ -106,16 +105,16 @@ func publishMessageToDB(msg *model.Message) {
 	}
 }
 
-func appendMessageToRedis(msg *model.Message) error {
-	return redis_cache.AppendMessage(msg.SessionID, msg)
+func appendMessageToCache(msg *model.Message) error {
+	return messageDAO.AppendCachedMessage(msg.SessionID, msg)
 }
 
 func persistMessage(msg *model.Message) {
 	if msg == nil {
 		return
 	}
-	if err := appendMessageToRedis(msg); err != nil {
-		log.Printf("appendMessageToRedis failed: %v", err)
+	if err := appendMessageToCache(msg); err != nil {
+		log.Printf("appendMessageToCache failed: %v", err)
 	}
 	publishMessageToDB(msg)
 }
@@ -197,7 +196,7 @@ func checkOwnedSession(sessionID string, userName string) (*model.Session, code.
 
 // loadSessionHistory 从 Redis 获取消息历史，并在缓存未命中时回源数据库。
 func loadSessionHistory(sessionID string, userName string) ([]*model.Message, error) {
-	cachedMessages, err := redis_cache.GetMessages(sessionID)
+	cachedMessages, err := messageDAO.GetCachedMessages(sessionID)
 	if err != nil {
 		log.Printf("loadSessionHistory redis error: %v", err)
 	} else if len(cachedMessages) > 0 {
@@ -217,7 +216,7 @@ func loadSessionHistory(sessionID string, userName string) ([]*model.Message, er
 
 	if len(history) > 0 {
 		go func() {
-			if err := redis_cache.CacheMessages(sessionID, history); err != nil {
+			if err := messageDAO.StoreCachedMessages(sessionID, history); err != nil {
 				log.Printf("loadSessionHistory cache to redis error: %v", err)
 			}
 		}()

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"GopherAI/common/code"
-	redis_cache "GopherAI/common/redis"
+	messageDAO "GopherAI/dao/message"
 	"GopherAI/dao/session"
 	"GopherAI/model"
 )
@@ -41,7 +41,7 @@ func DeleteSession(userName string, sessionID string) code.Code {
 		return code.CodeSessionNotFound
 	}
 
-	_ = redis_cache.DeleteMessages(sessionID)
+	_ = messageDAO.DeleteCachedMessages(sessionID)
 
 	return code.CodeSuccess
 }

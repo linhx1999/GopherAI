@@ -3,7 +3,6 @@ package user
 import (
 	"GopherAI/common/code"
 	myemail "GopherAI/common/email"
-	myredis "GopherAI/common/redis"
 	"GopherAI/dao/user"
 	"GopherAI/model"
 	"GopherAI/utils"
@@ -42,7 +41,7 @@ func Register(email, password, captcha string) (string, code.Code) {
 	}
 
 	//2:从redis中验证验证码是否有效
-	if ok, _ := myredis.CheckCaptchaForEmail(email, captcha); !ok {
+	if ok, _ := user.VerifyEmailCaptcha(email, captcha); !ok {
 		return "", code.CodeInvalidCaptcha
 	}
 
@@ -76,7 +75,7 @@ func Register(email, password, captcha string) (string, code.Code) {
 func SendCaptcha(email_ string) code.Code {
 	send_code := utils.GetRandomNumbers(6)
 	//1:先存放到redis
-	if err := myredis.SetCaptchaForEmail(email_, send_code); err != nil {
+	if err := user.StoreEmailCaptcha(email_, send_code); err != nil {
 		return code.CodeServerBusy
 	}
 
