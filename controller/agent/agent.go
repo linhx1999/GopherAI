@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,10 +17,10 @@ const ginSSEEventName = "message"
 
 // ChatRequest 表示生成类接口的共享请求体。
 type ChatRequest struct {
-	SessionID    string   `json:"session_id"`    // 可选，为空则创建新会话
-	Message      string   `json:"message"`       // 必填，用户消息内容
-	Tools        []string `json:"tools"`         // 可选，工具列表
-	ThinkingMode bool     `json:"thinking_mode"` // 可选，是否启用思考模型
+	SessionID    string   `json:"session_id"`                 // 可选，为空则创建新会话
+	Message      string   `json:"message" binding:"required"` // 必填，用户消息内容
+	Tools        []string `json:"tools"`                      // 可选，工具列表
+	ThinkingMode bool     `json:"thinking_mode"`              // 可选，是否启用思考模型
 }
 
 // GenerateHandler 处理非流式生成请求。
@@ -118,10 +117,7 @@ func GetTools(c *gin.Context) {
 func parseChatRequest(c *gin.Context) (*ChatRequest, error) {
 	req := new(ChatRequest)
 	if err := c.ShouldBindJSON(req); err != nil {
-		return nil, errors.New("invalid parameters")
-	}
-	if req.Message == "" {
-		return nil, errors.New("message is required")
+		return nil, err
 	}
 	return req, nil
 }
