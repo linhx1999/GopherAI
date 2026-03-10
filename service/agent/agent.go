@@ -183,7 +183,7 @@ func emitEvent(ctx context.Context, events chan<- StreamEvent, event StreamEvent
 	}
 }
 
-func loadOwnedSession(sessionID string, userName string) (*model.Session, code.Code) {
+func checkOwnedSession(sessionID string, userName string) (*model.Session, code.Code) {
 	session, err := sessionDAO.GetSessionByIDAndUserName(sessionID, userName)
 	if err == nil {
 		return session, code.CodeSuccess
@@ -191,22 +191,22 @@ func loadOwnedSession(sessionID string, userName string) (*model.Session, code.C
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, code.CodeSessionNotFound
 	}
-	log.Printf("loadOwnedSession error: %v", err)
+	log.Printf("checkOwnedSession error: %v", err)
 	return nil, code.CodeServerBusy
 }
 
-// getSessionHistory 从 Redis 获取消息历史，并在缓存未命中时回源数据库。
-func getSessionHistory(sessionID string, userName string) ([]*model.Message, error) {
+// loadSessionHistory 从 Redis 获取消息历史，并在缓存未命中时回源数据库。
+func loadSessionHistory(sessionID string, userName string) ([]*model.Message, error) {
 	cachedMessages, err := redis_cache.GetMessages(sessionID)
 	if err != nil {
-		log.Printf("getSessionHistory redis error: %v", err)
+		log.Printf("loadSessionHistory redis error: %v", err)
 	} else if len(cachedMessages) > 0 {
 		return cachedMessages, nil
 	}
 
 	dbMessages, err := messageDAO.ListMessagesBySessionAndUserOrdered(sessionID, userName)
 	if err != nil {
-		log.Printf("getSessionHistory db error: %v", err)
+		log.Printf("loadSessionHistory db error: %v", err)
 		return nil, err
 	}
 
@@ -218,12 +218,25 @@ func getSessionHistory(sessionID string, userName string) ([]*model.Message, err
 	if len(history) > 0 {
 		go func() {
 			if err := redis_cache.CacheMessages(sessionID, history); err != nil {
-				log.Printf("getSessionHistory cache to redis error: %v", err)
+				log.Printf("loadSessionHistory cache to redis error: %v", err)
 			}
 		}()
 	}
 
 	return history, nil
+}
+
+func buildHistoryMessageItems(msgs []*model.Message) []HistoryMessageItem {
+	items := make([]HistoryMessageItem, 0, len(msgs))
+	for _, msg := range msgs {
+		msgCopy := msg
+		items = append(items, HistoryMessageItem{
+			Index:     msg.Index,
+			Message:   msgCopy.GetSchemaMessage(),
+			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return items
 }
 
 func createSession(userName string, title string) (string, code.Code) {
@@ -249,14 +262,14 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 			return nil, code_
 		}
 	} else {
-		if _, code_ := loadOwnedSession(sessionID, req.UserName); code_ != code.CodeSuccess {
+		if _, code_ := checkOwnedSession(sessionID, req.UserName); code_ != code.CodeSuccess {
 			return nil, code_
 		}
 	}
 
-	history, err := getSessionHistory(sessionID, req.UserName)
+	history, err := loadSessionHistory(sessionID, req.UserName)
 	if err != nil {
-		log.Println("prepareChatExecution getSessionHistory error:", err)
+		log.Println("prepareChatExecution loadSessionHistory error:", err)
 		return nil, code.CodeServerBusy
 	}
 
@@ -371,24 +384,15 @@ func Stream(ctx context.Context, userName, sessionID, userMessage string, enable
 
 // ListHistoryMessages 获取当前用户的会话消息列表。
 func ListHistoryMessages(sessionID string, userName string) ([]HistoryMessageItem, code.Code) {
-	if _, code_ := loadOwnedSession(sessionID, userName); code_ != code.CodeSuccess {
+	if _, code_ := checkOwnedSession(sessionID, userName); code_ != code.CodeSuccess {
 		return nil, code_
 	}
 
-	msgs, err := messageDAO.ListMessagesBySessionAndUserOrdered(sessionID, userName)
+	msgs, err := loadSessionHistory(sessionID, userName)
 	if err != nil {
 		log.Println("ListHistoryMessages error:", err)
 		return nil, code.CodeServerBusy
 	}
 
-	items := make([]HistoryMessageItem, 0, len(msgs))
-	for _, msg := range msgs {
-		msgCopy := msg
-		items = append(items, HistoryMessageItem{
-			Index:     msg.Index,
-			Message:   msgCopy.GetSchemaMessage(),
-			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
-		})
-	}
-	return items, code.CodeSuccess
+	return buildHistoryMessageItems(msgs), code.CodeSuccess
 }

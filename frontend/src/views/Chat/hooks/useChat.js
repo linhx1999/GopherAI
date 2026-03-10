@@ -78,6 +78,10 @@ const createRecord = ({
   enabledToolNames
 })
 
+const hasMessageIndex = (records = [], messageIndex) => (
+  typeof messageIndex === 'number' && records.some((record) => record.index === messageIndex)
+)
+
 const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
@@ -137,20 +141,23 @@ const useChat = () => {
       }
 
       if (response.data?.code === STATUS_CODES.SUCCESS) {
-        setMessages(parseHistoryResponse(response.data))
-        return
+        const historyRecords = parseHistoryResponse(response.data)
+        setMessages(historyRecords)
+        return historyRecords
       }
 
       setMessages([])
       if (response.data?.msg) {
         message.error(response.data.msg)
       }
+      return []
     } catch (err) {
       if (latestHistorySessionRef.current !== targetSessionId) {
-        return
+        return []
       }
       console.error('Load history error:', err)
       setMessages([])
+      return []
     }
   }, [message])
 
@@ -427,16 +434,43 @@ const useChat = () => {
 
   const sendGenerateMessage = useCallback(async (question, runOptions) => {
     const payload = buildChatRequest(question, runOptions)
+    const hasEnabledTools = runOptions.enabledToolNames.length > 0
     try {
       const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
 
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         const data = response.data?.data || {}
+        let historyRecords = []
         if (data.session_id) {
           handleSessionCreated(String(data.session_id))
-          await loadMessages(String(data.session_id))
+          historyRecords = await loadMessages(String(data.session_id))
         } else if (activeKey && !isTempSession) {
-          await loadMessages(activeKey)
+          historyRecords = await loadMessages(activeKey)
+        }
+
+        const shouldAppendFallback = (
+          !hasEnabledTools &&
+          typeof data.message_index === 'number' &&
+          isSchemaMessagePayload(data.message) &&
+          !hasMessageIndex(historyRecords, data.message_index)
+        )
+
+        if (shouldAppendFallback) {
+          setMessages((prev) => {
+            if (hasMessageIndex(prev, data.message_index)) {
+              return prev
+            }
+
+            return [...prev, createRecord({
+              index: data.message_index,
+              message: data.message,
+              pending: false,
+              renderMode: MESSAGE_RENDER_MODE.INSTANT,
+              expectReasoning: runOptions.thinkingModeEnabled && data.message.role === MESSAGE_ROLES.ASSISTANT,
+              assistantRenderMode: ASSISTANT_DISPLAY_MODES.DEFAULT,
+              enabledToolNames: runOptions.enabledToolNames
+            })]
+          })
         }
       } else {
         message.error(response.data?.msg || '发送失败')

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 
@@ -56,5 +57,36 @@ func TestBuildConversationMessagesUsesStoredSchemaPayload(t *testing.T) {
 	}
 	if messages[2].Content != "继续" {
 		t.Fatalf("unexpected user message: %#v", messages[2])
+	}
+}
+
+func TestBuildHistoryMessageItemsPreservesReasoningContent(t *testing.T) {
+	items := buildHistoryMessageItems([]*model.Message{
+		{
+			SessionID: "sess_1",
+			UserName:  "alice",
+			Index:     1,
+			CreatedAt: time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
+			Payload:   []byte(`{"role":"assistant","content":"答案","reasoning_content":"先思考"}`),
+		},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("unexpected item count: %d", len(items))
+	}
+	if items[0].Index != 1 {
+		t.Fatalf("unexpected index: %d", items[0].Index)
+	}
+	if items[0].Message == nil {
+		t.Fatal("expected schema message")
+	}
+	if items[0].Message.ReasoningContent != "先思考" {
+		t.Fatalf("unexpected reasoning content: %q", items[0].Message.ReasoningContent)
+	}
+	if items[0].Message.Content != "答案" {
+		t.Fatalf("unexpected content: %q", items[0].Message.Content)
+	}
+	if items[0].CreatedAt != "2026-03-10T09:00:00Z" {
+		t.Fatalf("unexpected created_at: %q", items[0].CreatedAt)
 	}
 }

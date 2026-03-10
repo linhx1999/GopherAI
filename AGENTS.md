@@ -101,6 +101,7 @@ GopherAI/
 - SSE 仅保留 `meta` / `error` 控制包，其余 `data` 直接发送完整 `schema.Message`
 - 流结束追加 `data: [DONE]`
 - Redis 与 RabbitMQ 载荷都保留 `index`、`payload`、`tool_calls`
+- 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，以兼容“Redis 同步写、PostgreSQL 异步落库”的消息链路
 
 消息模型关键字段：
 
@@ -121,6 +122,7 @@ type Message struct {
 - 未启用工具时，`reasoning_content` 使用 `Think` 展示
 - 启用工具后，前端将 `assistant(tool_calls)`、`tool`、最终 `assistant` 重建为 `ThoughtChain`
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
+- 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
 
 ### 4. RAG 与文件流程
 

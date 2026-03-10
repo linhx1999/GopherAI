@@ -64,6 +64,8 @@ pnpm dev
 - SSE 除 `meta` / `error` 外，`data` 直接发送完整的 `schema.Message` JSON
 - 流结束后服务端追加 `data: [DONE]`
 - 历史消息接口返回 `{ index, message, created_at }`，其中 `message` 为完整 `schema.Message`
+- 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，保证非流式生成后立即刷新也能读到最新 `reasoning_content`
+- 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 
 ### SSE 示例
 
