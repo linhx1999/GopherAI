@@ -126,6 +126,7 @@ func writeCodeResponse(c *gin.Context, code_ code.Code) {
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code_,
 		Msg:  code_.Msg(),
+		Data: gin.H{},
 	})
 }
 
