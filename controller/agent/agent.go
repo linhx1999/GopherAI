@@ -32,13 +32,14 @@ func GenerateHandler(c *gin.Context) {
 		return
 	}
 
-	result, code_ := agentService.Generate(c.Request.Context(), agentService.GenerateRequest{
-		UserName:         c.GetString("userName"),
-		SessionID:        req.SessionID,
-		UserMessage:      req.Message,
-		EnabledToolNames: req.Tools,
-		ThinkingMode:     req.ThinkingMode,
-	})
+	result, code_ := agentService.Generate(
+		c.Request.Context(),
+		c.GetString("userName"),
+		req.SessionID,
+		req.Message,
+		req.Tools,
+		req.ThinkingMode,
+	)
 	if code_ != code.CodeSuccess {
 		writeCodeResponse(c, code_)
 		return
@@ -61,13 +62,14 @@ func StreamHandler(c *gin.Context) {
 		return
 	}
 
-	stream, code_ := agentService.Stream(c.Request.Context(), agentService.GenerateRequest{
-		UserName:         c.GetString("userName"),
-		SessionID:        req.SessionID,
-		UserMessage:      req.Message,
-		EnabledToolNames: req.Tools,
-		ThinkingMode:     req.ThinkingMode,
-	})
+	stream, code_ := agentService.Stream(
+		c.Request.Context(),
+		c.GetString("userName"),
+		req.SessionID,
+		req.Message,
+		req.Tools,
+		req.ThinkingMode,
+	)
 	if code_ != code.CodeSuccess {
 		setSSEHeaders(c)
 		streamSSE(c, errorEventStream(code_, ""))
@@ -122,10 +124,10 @@ func parseChatRequest(c *gin.Context) (*ChatRequest, error) {
 	return req, nil
 }
 
-func writeCodeResponse(c *gin.Context, code_ code.Code) {
+func writeCodeResponse(c *gin.Context, code code.Code) {
 	c.JSON(http.StatusOK, controller.Response{
-		Code: code_,
-		Msg:  code_.Msg(),
+		Code: code,
+		Msg:  code.Msg(),
 		Data: gin.H{},
 	})
 }

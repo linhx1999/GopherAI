@@ -54,6 +54,7 @@ type StreamHandle struct {
 }
 
 // GenerateRequest 表示一次消息生成请求。
+// 已废弃：保留用于内部 prepareChatExecution，外部调用请使用具体参数。
 type GenerateRequest struct {
 	UserName         string
 	SessionID        string
@@ -281,8 +282,14 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 }
 
 // Generate 同步生成响应。
-func Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, req)
+func Generate(ctx context.Context, userName, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*GenerateResult, code.Code) {
+	run, code_ := prepareChatExecution(ctx, GenerateRequest{
+		UserName:         userName,
+		SessionID:        sessionID,
+		UserMessage:      userMessage,
+		EnabledToolNames: enabledToolNames,
+		ThinkingMode:     thinkingMode,
+	})
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -315,8 +322,14 @@ func Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, code.C
 }
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
-func Stream(ctx context.Context, req GenerateRequest) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, req)
+func Stream(ctx context.Context, userName, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+	run, code_ := prepareChatExecution(ctx, GenerateRequest{
+		UserName:         userName,
+		SessionID:        sessionID,
+		UserMessage:      userMessage,
+		EnabledToolNames: enabledToolNames,
+		ThinkingMode:     thinkingMode,
+	})
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
