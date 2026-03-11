@@ -1,6 +1,6 @@
 # GopherAI
 
-一个基于 Go 的 AI 助手平台，支持多模型对话、SSE 流式回复、RAG 知识库检索、MCP 工具调用和文件管理。
+一个基于 Go 的 AI 助手平台，支持多模型对话、SSE 流式回复、RAG 知识库检索和文件管理。
 
 ## 功能特性
 
@@ -10,7 +10,7 @@
 - 显式工具启用：仅本轮勾选的工具参与执行，不再隐式启用默认工具
 - RAG 知识库：支持文档上传、切分、向量索引、按文件检索
 - 文件管理：上传、下载、索引、删索引、删除文件
-- MCP / TTS：支持 MCP 工具扩展与语音合成
+- TTS：支持语音合成
 
 ## 技术栈
 
@@ -69,13 +69,16 @@ pnpm dev
 - 持久化模型统一采用“`gorm.Model` + 业务 UUID”双标识；数据库内部关联走数值 ID，对外接口统一使用业务 UUID
 - Session 模型不持久化工具列表；工具启用状态仅来自当前请求的 `tools`
 - `GET /api/v1/tools` 同时返回 `name` 和 `display_name`：前者用于 API 调用，后者仅用于前端展示
-- 后端内置工具按工具名拆分到 `common/agent/tools/*.go`；例如 `knowledge_search.go`、`sequential_thinking.go`，`registry.go` 只负责注册和解析
+- 后端工具按工具名拆分到 `common/agent/tools/*.go`；服务端仅保留一个全局工具 map，按请求中的工具名直接构造 `[]tool.BaseTool`
+- 生成与流式执行共享同一套准备逻辑，服务端按请求参数直接装配 agent 与执行上下文，不再额外包装内部请求对象
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
+- `POST /api/v1/agent/*` 收到未知工具名时会直接返回请求参数错误，且不会创建会话、写入消息或触发模型调用
 - 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
 - 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 - 流式工具调用按“单轮回答”聚合展示：assistant 文本先正常流式显示；当后续收到 `finish_reason=tool_calls` 时，前面累积的文本会被回收为对应工具步骤的 `description`，步骤 `title` 使用工具 API 名称，`role=tool` 继续作为独立结果项；只有最终 `finish_reason=stop` 前累积的最新文本会保留在正文 bubble 中，纯 finish metadata 的空 chunk 不会单独渲染
+- ThoughtChain 中的工具结果内容使用 `XMarkdown` 渲染，保持与正文 Markdown 一致的展示效果
 - 前端基于 Ant Design 6 开发时，优先使用 `variant`、`orientation` 等新属性，避免继续使用 `bordered`、`direction` 这类已弃用 API
 
 ## 标识模型说明

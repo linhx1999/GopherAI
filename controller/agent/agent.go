@@ -112,8 +112,7 @@ func GetMessages(c *gin.Context) {
 // GetTools 获取可用工具列表
 // GET /api/v1/tools
 func GetTools(c *gin.Context) {
-	registry := tools.GetToolRegistry()
-	toolList := registry.ListAvailableTools(c.Request.Context())
+	toolList := tools.ListAvailableTools()
 
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,

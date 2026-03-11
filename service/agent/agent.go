@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	agentcommon "GopherAI/common/agent"
+	agenttools "GopherAI/common/agent/tools"
 	"GopherAI/common/code"
 	"GopherAI/common/rabbitmq"
 	messageDAO "GopherAI/dao/message"
@@ -51,16 +52,6 @@ type StreamEvent struct {
 type StreamHandle struct {
 	SessionID string
 	Events    <-chan StreamEvent
-}
-
-// GenerateRequest 表示一次消息生成请求。
-// 已废弃：保留用于内部 prepareChatExecution，外部调用请使用具体参数。
-type GenerateRequest struct {
-	UserRefID        uint
-	SessionID        string
-	UserMessage      string
-	EnabledToolNames []string
-	ThinkingMode     bool
 }
 
 // GenerateResult 表示非流式生成结果。
@@ -268,52 +259,62 @@ func createSession(userRefID uint, title string) (*model.Session, code.Code) {
 	return createdSession, code.CodeSuccess
 }
 
-func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedChatExecution, code.Code) {
+func prepareChatExecution(
+	ctx context.Context,
+	userRefID uint,
+	sessionID, userMessage string,
+	enabledToolNames []string,
+	thinkingMode bool,
+) (*preparedChatExecution, code.Code) {
+	normalizedToolNames := agenttools.NormalizeToolNames(enabledToolNames)
+	hasEnabledTools := len(normalizedToolNames) > 0
+	agent, err := agentcommon.GetAgentManager().CreateAgentForChat(
+		ctx,
+		userRefID,
+		normalizedToolNames,
+		thinkingMode,
+		buildAgentInstruction(hasEnabledTools),
+	)
+	if err != nil {
+		if agenttools.IsUnknownToolError(err) {
+			log.Println("prepareChatExecution CreateAgentForChat invalid tools:", err)
+			return nil, code.CodeInvalidParams
+		}
+		log.Println("prepareChatExecution CreateAgentForChat error:", err)
+		return nil, code.AIModelFail
+	}
+
 	var (
 		session *model.Session
 		code_   code.Code
 	)
 
-	if req.SessionID == "" {
-		session, code_ = createSession(req.UserRefID, req.UserMessage)
+	if sessionID == "" {
+		session, code_ = createSession(userRefID, userMessage)
 		if code_ != code.CodeSuccess {
 			return nil, code_
 		}
 	} else {
-		session, code_ = checkOwnedSession(req.SessionID, req.UserRefID)
+		session, code_ = checkOwnedSession(sessionID, userRefID)
 		if code_ != code.CodeSuccess {
 			return nil, code_
 		}
 	}
 
-	history, err := loadSessionHistory(session, req.UserRefID)
+	history, err := loadSessionHistory(session, userRefID)
 	if err != nil {
 		log.Println("prepareChatExecution loadSessionHistory error:", err)
 		return nil, code.CodeServerBusy
 	}
 
 	userMessageIndex := len(history)
-	userMessage := schema.UserMessage(req.UserMessage)
-	persistMessage(session.SessionID, buildStoredMessage(session, req.UserRefID, userMessageIndex, userMessage))
-
-	hasEnabledTools := len(req.EnabledToolNames) > 0
-
-	agent, err := agentcommon.GetAgentManager().CreateAgentForChat(
-		ctx,
-		req.UserRefID,
-		req.EnabledToolNames,
-		req.ThinkingMode,
-		buildAgentInstruction(hasEnabledTools),
-	)
-	if err != nil {
-		log.Println("prepareChatExecution CreateAgentForChat error:", err)
-		return nil, code.AIModelFail
-	}
+	userMessageSchema := schema.UserMessage(userMessage)
+	persistMessage(session.SessionID, buildStoredMessage(session, userRefID, userMessageIndex, userMessageSchema))
 
 	return &preparedChatExecution{
 		session:                    session,
-		userRefID:                  req.UserRefID,
-		conversation:               buildConversationMessages(history, userMessage),
+		userRefID:                  userRefID,
+		conversation:               buildConversationMessages(history, userMessageSchema),
 		firstAssistantMessageIndex: userMessageIndex + 1,
 		agent:                      agent,
 	}, code.CodeSuccess
@@ -321,13 +322,7 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 
 // Generate 同步生成响应。
 func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, GenerateRequest{
-		UserRefID:        userRefID,
-		SessionID:        sessionID,
-		UserMessage:      userMessage,
-		EnabledToolNames: enabledToolNames,
-		ThinkingMode:     thinkingMode,
-	})
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -365,13 +360,7 @@ func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
 func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, GenerateRequest{
-		UserRefID:        userRefID,
-		SessionID:        sessionID,
-		UserMessage:      userMessage,
-		EnabledToolNames: enabledToolNames,
-		ThinkingMode:     thinkingMode,
-	})
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}

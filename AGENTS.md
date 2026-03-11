@@ -80,15 +80,15 @@ GopherAI/
 
 - 核心目录：`common/agent/`
 - `manager.go` 负责基于全局 ChatModel 池按请求创建 Eino ADK `ChatModelAgent`
-- `tools/registry.go` 只负责工具注册、聚合和解析；每个内置工具单独放在 `tools/` 下与工具名对应的 Go 文件中
+- `tools/registry.go` 仅维护全局工具 map；后端按请求中的工具名直接构造 `[]tool.BaseTool`
 - 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`
+- 请求中的未知工具名属于参数错误，必须在创建会话、写入消息和调用模型前被拦截
 - `common/llm` 维护按模型名复用的全局 ChatModel 实例池；`thinking_mode` 通过选择不同全局模型实现
 
 内置工具：
 - `knowledge_search`
 - `sequential_thinking`
-- 动态加载的 MCP 工具
 
 ### 2. 流式消息链路
 
@@ -139,9 +139,9 @@ type Message struct {
 - 启用工具后，前端按 `finish_reason` 驱动 ThoughtChain：assistant 普通流式文本先按正文展示；收到 `finish_reason=tool_calls` 后，再把前面累积的文本回收为对应工具步骤的 `description`，步骤 `title` 使用工具 API 名称，随后 `role=tool` 作为独立结果项展示
 - 仅携带 `finish_reason` 等 metadata 的空 assistant chunk 不应单独渲染成气泡，而应只用于结束当前工具调用阶段或最终回答阶段
 - 只有最终 `finish_reason=stop` 前累积的最新 assistant 文本才作为正文 bubble 保留
+- ThoughtChain 中 `role=tool` 的结果内容统一使用 `XMarkdown` 渲染
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
-- 示例 MCP 代码中不再内置 `get_weather` 工具；如需新增 MCP 工具，应在 `common/mcp/server/server.go` 明确注册
 - 首轮请求若未携带 `session_id`，前端在拿到服务端返回的真实会话 ID 后要立即更新 `activeKey`，保证后续续聊复用同一会话
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
 
@@ -187,6 +187,8 @@ type Message struct {
 ### Agent 接口约定
 
 - `tools` 字段是请求级显式工具 API 名称列表，不写入会话配置
+- 后端按请求中的工具名顺序去重后装配 `[]tool.BaseTool`；未知工具名直接返回参数错误
+- `service/agent` 的生成与流式入口共享同一套显式参数准备逻辑，不再额外定义内部请求 DTO
 - system prompt 通过 ADK `ChatModelAgentConfig.Instruction` 注入；会话消息数组只包含历史消息和当前用户消息
 - SSE `data` 直接传 `schema.Message` JSON，不再拆分自定义 delta 事件
 - 历史消息接口只允许读取当前用户自己的会话；前端直接读取 `response.data.data.messages`
@@ -297,10 +299,10 @@ type Response struct {
 4. 在 `controller/` 添加 Handler
 5. 在 `router/` 注册路由
 
-### 添加 MCP 工具
+### 添加新的 Agent 工具
 
-1. 在 `common/mcp/server/server.go` 注册工具
-2. 在 Agent 工具注册表中暴露该工具
+1. 在 `common/agent/tools/` 新增对应工具文件
+2. 在全局工具 map 中注册该工具描述与构造函数
 
 ### 添加模型能力
 

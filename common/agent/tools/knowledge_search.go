@@ -127,11 +127,8 @@ func knowledgeSearchDescriptor() localToolDescriptor {
 			},
 		},
 		Category: "rag",
-		Build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, bool, error) {
-			if len(fileRefIDs) == 0 {
-				return nil, false, nil
-			}
-			return newKnowledgeSearchTool(fileRefIDs), true, nil
+		Build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, error) {
+			return newKnowledgeSearchTool(fileRefIDs), nil
 		},
 	}
 }

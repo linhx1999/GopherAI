@@ -40,12 +40,20 @@ func sequentialThinkingDescriptor() localToolDescriptor {
 		Description: sequentialThinkingToolDescription,
 		Parameters:  map[string]interface{}{},
 		Category:    "builtin",
-		Build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, bool, error) {
+		Build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, error) {
 			builtinTool, err := sequentialthinking.NewTool()
 			if err != nil {
-				return nil, false, fmt.Errorf("create %s tool failed: %w", sequentialThinkingToolName, err)
+				return nil, fmt.Errorf("create %s tool failed: %w", sequentialThinkingToolName, err)
 			}
-			return &sequentialThinkingTool{inner: builtinTool}, true, nil
+			return &sequentialThinkingTool{inner: builtinTool}, nil
 		},
 	}
+}
+
+func GetSequentialThinkingTool() (tool.BaseTool, error) {
+	inner, err := sequentialthinking.NewTool()
+	if err != nil {
+		return nil, fmt.Errorf("create %s tool failed: %w", sequentialThinkingToolName, err)
+	}
+	return &sequentialThinkingTool{inner: inner}, nil
 }

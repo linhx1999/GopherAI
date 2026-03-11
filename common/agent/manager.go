@@ -75,11 +75,10 @@ func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID 
 		fileRefIDs = []uint{}
 	}
 
-	registry := tools.GetToolRegistry()
 	normalizedToolNames := tools.NormalizeToolNames(enabledToolNames)
-	toolInstances, err := registry.ResolveTools(ctx, normalizedToolNames, fileRefIDs)
+	toolInstances, err := tools.BuildRequestedTools(ctx, normalizedToolNames, fileRefIDs)
 	if err != nil {
-		return nil, fmt.Errorf("resolve tools failed: %w", err)
+		return nil, fmt.Errorf("build tools failed: %w", err)
 	}
 
 	return &AgentSessionConfig{
