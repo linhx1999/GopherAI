@@ -11,6 +11,12 @@ import (
 	"GopherAI/common/rag"
 )
 
+const (
+	knowledgeSearchToolName        = "knowledge_search"
+	knowledgeSearchToolDisplayName = "知识库检索"
+	knowledgeSearchToolDescription = "从知识库中检索相关文档。当用户问题涉及已上传的文档内容时，使用此工具获取相关信息。"
+)
+
 // RAGTool RAG 检索工具
 type RAGTool struct {
 	fileRefIDs []uint // 可检索的文件内部 ID 列表
@@ -31,8 +37,8 @@ type RAGToolResult struct {
 // Info 返回工具元信息
 func (t *RAGTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "knowledge_search",
-		Desc: "从知识库中检索相关文档。当用户问题涉及已上传的文档内容时，使用此工具获取相关信息。",
+		Name: knowledgeSearchToolName,
+		Desc: knowledgeSearchToolDescription,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"query": {
 				Type:     "string",
@@ -99,7 +105,33 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	return string(bytes), nil
 }
 
-// NewRAGTool 创建 RAG 工具实例
-func NewRAGTool(fileRefIDs []uint) tool.InvokableTool {
+func newKnowledgeSearchTool(fileRefIDs []uint) tool.InvokableTool {
 	return &RAGTool{fileRefIDs: fileRefIDs}
+}
+
+func knowledgeSearchDescriptor() localToolDescriptor {
+	return localToolDescriptor{
+		Name:        knowledgeSearchToolName,
+		DisplayName: knowledgeSearchToolDisplayName,
+		Description: knowledgeSearchToolDescription,
+		Parameters: map[string]interface{}{
+			"query": map[string]interface{}{
+				"type":        "string",
+				"description": "检索查询语句",
+				"required":    true,
+			},
+			"top_k": map[string]interface{}{
+				"type":        "number",
+				"description": "返回的相关文档数量，默认为 5",
+				"required":    false,
+			},
+		},
+		Category: "rag",
+		Build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, bool, error) {
+			if len(fileRefIDs) == 0 {
+				return nil, false, nil
+			}
+			return newKnowledgeSearchTool(fileRefIDs), true, nil
+		},
+	}
 }

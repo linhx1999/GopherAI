@@ -80,9 +80,9 @@ GopherAI/
 
 - 核心目录：`common/agent/`
 - `manager.go` 负责 Agent 创建、缓存和流式执行
-- `tools/registry.go` 负责内置工具与 MCP 工具注册
+- `tools/registry.go` 只负责工具注册、聚合和解析；每个内置工具单独放在 `tools/` 下与工具名对应的 Go 文件中
 - 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
-- Sequential Thinking 官方工具名按 `sequentialthinking` 处理，同时兼容历史别名 `sequential_thinking`
+- 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`
 - Agent 缓存键包含 `sessionID + modelName + toolSignature`，避免不同工具组合复用同一实例
 
 内置工具：

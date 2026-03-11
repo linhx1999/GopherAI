@@ -69,7 +69,8 @@ pnpm dev
 - 持久化模型统一采用“`gorm.Model` + 业务 UUID”双标识；数据库内部关联走数值 ID，对外接口统一使用业务 UUID
 - Session 模型不持久化工具列表；工具启用状态仅来自当前请求的 `tools`
 - `GET /api/v1/tools` 同时返回 `name` 和 `display_name`：前者用于 API 调用，后者仅用于前端展示
-- Sequential Thinking 工具的实际调用名可能表现为 `sequentialthinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
+- 后端内置工具按工具名拆分到 `common/agent/tools/*.go`；例如 `knowledge_search.go`、`sequential_thinking.go`，`registry.go` 只负责注册和解析
+- 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
 - 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示

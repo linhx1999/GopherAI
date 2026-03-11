@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	einomcp "github.com/cloudwego/eino-ext/components/tool/mcp"
-	"github.com/cloudwego/eino-ext/components/tool/sequentialthinking"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	mcpClient "github.com/mark3labs/mcp-go/client"
@@ -30,12 +29,21 @@ type MCPClientConfig struct {
 	URL  string // MCP 服务器 URL
 }
 
+type localToolDescriptor struct {
+	Name        string
+	DisplayName string
+	Description string
+	Parameters  map[string]interface{}
+	Category    string
+	Build       func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, bool, error)
+}
+
 // ToolRegistry 工具注册表
 type ToolRegistry struct {
 	mu         sync.RWMutex
-	builtin    map[string]tool.BaseTool       // 内置工具
-	mcpClients map[string]mcpClient.MCPClient // MCP 客户端
-	mcpConfigs map[string]*MCPClientConfig    // MCP 配置
+	localTools map[string]localToolDescriptor
+	mcpClients map[string]mcpClient.MCPClient
+	mcpConfigs map[string]*MCPClientConfig
 }
 
 var (
@@ -43,33 +51,57 @@ var (
 	registryOnce sync.Once
 )
 
-const (
-	sequentialThinkingToolName      = "sequentialthinking"
-	legacySequentialThinkingToolKey = "sequential_thinking"
-)
-
 // GetToolRegistry 获取全局工具注册表
 func GetToolRegistry() *ToolRegistry {
 	registryOnce.Do(func() {
 		registry = &ToolRegistry{
-			builtin:    make(map[string]tool.BaseTool),
+			localTools: make(map[string]localToolDescriptor),
 			mcpClients: make(map[string]mcpClient.MCPClient),
 			mcpConfigs: make(map[string]*MCPClientConfig),
 		}
-		registry.initBuiltinTools()
+		registry.initLocalTools()
 	})
 	return registry
 }
 
-// initBuiltinTools 初始化内置工具
-func (r *ToolRegistry) initBuiltinTools() {
-	// 注册 Sequential Thinking 工具（使用官方实现）
-	tool, err := sequentialthinking.NewTool()
-	if err != nil {
-		log.Printf("Failed to create sequential_thinking tool: %v", err)
-	} else {
-		r.builtin[sequentialThinkingToolName] = tool
+func (r *ToolRegistry) initLocalTools() {
+	for _, descriptor := range []localToolDescriptor{
+		knowledgeSearchDescriptor(),
+		sequentialThinkingDescriptor(),
+	} {
+		r.registerLocalTool(descriptor)
 	}
+}
+
+func (r *ToolRegistry) registerLocalTool(descriptor localToolDescriptor) {
+	r.localTools[descriptor.Name] = descriptor
+}
+
+func (r *ToolRegistry) getLocalToolDescriptor(name string) (localToolDescriptor, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	descriptor, ok := r.localTools[name]
+	return descriptor, ok
+}
+
+func (r *ToolRegistry) listLocalToolDescriptors() []localToolDescriptor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]localToolDescriptor, 0, len(r.localTools))
+	for _, descriptor := range r.localTools {
+		result = append(result, descriptor)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Category != result[j].Category {
+			return result[i].Category < result[j].Category
+		}
+		return result[i].DisplayName < result[j].DisplayName
+	})
+
+	return result
 }
 
 // RegisterMCPClient 注册 MCP 客户端配置
@@ -100,24 +132,6 @@ func (r *ToolRegistry) UnregisterMCPClient(name string) {
 	delete(r.mcpConfigs, name)
 }
 
-// GetBuiltinTool 获取内置工具
-func (r *ToolRegistry) GetBuiltinTool(name string) tool.BaseTool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.builtin[name]
-}
-
-func (r *ToolRegistry) listBuiltinTools() []tool.BaseTool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	result := make([]tool.BaseTool, 0, len(r.builtin))
-	for _, builtinTool := range r.builtin {
-		result = append(result, builtinTool)
-	}
-	return result
-}
-
 func (r *ToolRegistry) listMCPClientNames() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -140,7 +154,6 @@ func (r *ToolRegistry) initMCPClient(ctx context.Context, name string) (mcpClien
 		return nil, nil
 	}
 
-	// 检查是否已初始化
 	r.mu.RLock()
 	if client, ok := r.mcpClients[name]; ok {
 		r.mu.RUnlock()
@@ -148,18 +161,15 @@ func (r *ToolRegistry) initMCPClient(ctx context.Context, name string) (mcpClien
 	}
 	r.mu.RUnlock()
 
-	// 创建 SSE MCP 客户端
 	cli, err := mcpClient.NewSSEMCPClient(config.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	// 启动客户端
 	if err := cli.Start(ctx); err != nil {
 		return nil, err
 	}
 
-	// 初始化
 	initRequest := mcpschema.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcpschema.LATEST_PROTOCOL_VERSION
 	initRequest.Params.ClientInfo = mcpschema.Implementation{
@@ -171,7 +181,6 @@ func (r *ToolRegistry) initMCPClient(ctx context.Context, name string) (mcpClien
 		return nil, err
 	}
 
-	// 缓存客户端
 	r.mu.Lock()
 	r.mcpClients[name] = cli
 	r.mu.Unlock()
@@ -202,7 +211,7 @@ func NormalizeToolNames(names []string) []string {
 func normalizeToolName(name string) string {
 	trimmedName := strings.TrimSpace(name)
 	switch trimmedName {
-	case legacySequentialThinkingToolKey:
+	case legacySequentialThinkingToolName:
 		return sequentialThinkingToolName
 	default:
 		return trimmedName
@@ -238,24 +247,24 @@ func (r *ToolRegistry) resolveMCPTool(ctx context.Context, toolName string) (too
 }
 
 // ResolveTools 根据 API 调用名列表解析工具实例。
-func (r *ToolRegistry) ResolveTools(ctx context.Context, names []string, ragFileIDs []uint) ([]tool.BaseTool, error) {
+func (r *ToolRegistry) ResolveTools(ctx context.Context, names []string, fileRefIDs []uint) ([]tool.BaseTool, error) {
 	normalizedNames := NormalizeToolNames(names)
 	resolvedTools := make([]tool.BaseTool, 0, len(normalizedNames))
 
 	for _, toolName := range normalizedNames {
-		switch toolName {
-		case "knowledge_search":
-			if len(ragFileIDs) > 0 {
-				resolvedTools = append(resolvedTools, NewRAGTool(ragFileIDs))
+		if descriptor, ok := r.getLocalToolDescriptor(toolName); ok {
+			resolvedTool, enabled, err := descriptor.Build(ctx, fileRefIDs)
+			if err != nil {
+				return nil, err
 			}
-		case sequentialThinkingToolName:
-			if builtinTool := r.GetBuiltinTool(sequentialThinkingToolName); builtinTool != nil {
-				resolvedTools = append(resolvedTools, builtinTool)
+			if enabled && resolvedTool != nil {
+				resolvedTools = append(resolvedTools, resolvedTool)
 			}
-		default:
-			if mcpTool, ok := r.resolveMCPTool(ctx, toolName); ok {
-				resolvedTools = append(resolvedTools, mcpTool)
-			}
+			continue
+		}
+
+		if mcpTool, ok := r.resolveMCPTool(ctx, toolName); ok {
+			resolvedTools = append(resolvedTools, mcpTool)
 		}
 	}
 
@@ -266,42 +275,16 @@ func (r *ToolRegistry) ResolveTools(ctx context.Context, names []string, ragFile
 func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 	result := make([]ToolInfo, 0)
 
-	// 1. 内置工具
-	for _, builtinTool := range r.listBuiltinTools() {
-		info, err := builtinTool.Info(ctx)
-		if err != nil {
-			continue
-		}
+	for _, descriptor := range r.listLocalToolDescriptors() {
 		result = append(result, ToolInfo{
-			Name:        info.Name,
-			DisplayName: toolDisplayName(info.Name),
-			Description: info.Desc,
-			Parameters:  extractParams(info),
-			Category:    "builtin",
+			Name:        descriptor.Name,
+			DisplayName: descriptor.DisplayName,
+			Description: descriptor.Description,
+			Parameters:  cloneParameters(descriptor.Parameters),
+			Category:    descriptor.Category,
 		})
 	}
 
-	// 2. 固定添加 knowledge_search（RAG 工具）
-	result = append(result, ToolInfo{
-		Name:        "knowledge_search",
-		DisplayName: toolDisplayName("knowledge_search"),
-		Description: "从知识库中检索相关文档。当用户问题涉及已上传的文档内容时，使用此工具获取相关信息。",
-		Parameters: map[string]interface{}{
-			"query": map[string]interface{}{
-				"type":        "string",
-				"description": "检索查询语句",
-				"required":    true,
-			},
-			"top_k": map[string]interface{}{
-				"type":        "number",
-				"description": "返回的相关文档数量，默认为 5",
-				"required":    false,
-			},
-		},
-		Category: "rag",
-	})
-
-	// 3. MCP 工具（异步加载，避免阻塞）
 	for _, clientName := range r.listMCPClientNames() {
 		cli, err := r.initMCPClient(ctx, clientName)
 		if err != nil {
@@ -320,7 +303,7 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 			}
 			result = append(result, ToolInfo{
 				Name:        info.Name,
-				DisplayName: toolDisplayName(info.Name),
+				DisplayName: info.Name,
 				Description: info.Desc,
 				Parameters:  extractParams(info),
 				Category:    "mcp",
@@ -338,47 +321,36 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 	return result
 }
 
-func toolDisplayName(toolName string) string {
-	switch normalizeToolName(toolName) {
-	case "knowledge_search":
-		return "知识库检索"
-	case sequentialThinkingToolName:
-		return "逐步思考"
-	default:
-		return toolName
+func cloneParameters(params map[string]interface{}) map[string]interface{} {
+	if len(params) == 0 {
+		return map[string]interface{}{}
 	}
+
+	cloned := make(map[string]interface{}, len(params))
+	for key, value := range params {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // extractParams 从 ToolInfo 提取参数定义
 func extractParams(info *schema.ToolInfo) map[string]interface{} {
-	params := make(map[string]interface{})
-
-	if info.ParamsOneOf == nil {
-		return params
+	if info == nil || info.ParamsOneOf == nil {
+		return map[string]interface{}{}
 	}
 
-	// 尝试使用 ByParams 方式获取参数
-	// 注意：ParamsOneOf 的内部字段是未导出的，我们只能通过其他方式获取
-	// 这里返回一个空 map，实际参数需要从工具文档中获取
-	return params
+	return map[string]interface{}{}
 }
 
 // HasTool 检查工具是否存在
 func (r *ToolRegistry) HasTool(name string) bool {
 	name = normalizeToolName(name)
+
+	if _, ok := r.getLocalToolDescriptor(name); ok {
+		return true
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
-	// 检查内置工具
-	if _, ok := r.builtin[name]; ok {
-		return true
-	}
-
-	// 检查特殊工具
-	if name == "knowledge_search" {
-		return true
-	}
-
-	// 检查 MCP 工具
 	return len(r.mcpConfigs) > 0
 }
