@@ -6,7 +6,7 @@
 
 - 多模型对话：支持 OpenAI 兼容模型、本地模型与 RAG 场景
 - 流式响应：SSE 实时输出，历史消息直接完整回放
-- 思考模式：普通回答使用 `Think`，启用工具时使用 `ThoughtChain`
+- 思考模式：普通回答使用 `Think`，启用工具时使用 `ThoughtChain`，工具调用前的规划文本会并入链路说明
 - 显式工具启用：仅本轮勾选的工具参与执行，不再隐式启用默认工具
 - RAG 知识库：支持文档上传、切分、向量索引、按文件检索
 - 文件管理：上传、下载、索引、删索引、删除文件
@@ -75,6 +75,7 @@ pnpm dev
 - 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
+- 流式工具调用按“单轮回答”聚合展示：工具调用前的 assistant 规划文本进入 `ThoughtChain` 的“工具规划”节点，`assistant(tool_calls)` / `tool` / 最终 `assistant` 合并为同一轮展示，只有纯 finish metadata 的空 chunk 不会单独渲染
 - 前端基于 Ant Design 6 开发时，优先使用 `variant`、`orientation` 等新属性，避免继续使用 `bordered`、`direction` 这类已弃用 API
 
 ## 标识模型说明

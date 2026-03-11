@@ -33,6 +33,21 @@ const DEFAULT_TOOL_DISPLAY_NAMES = {
   sequential_thinking: '逐步思考'
 }
 
+const hasVisibleMessageText = (message = {}) => Boolean(
+  String(message?.content || '').trim() || String(message?.reasoning_content || '').trim()
+)
+
+const getMessageDisplayContent = (message = {}) => {
+  const reasoning = String(message?.reasoning_content || '').trim()
+  const content = String(message?.content || '').trim()
+
+  if (reasoning && content) {
+    return `${reasoning}\n\n${content}`
+  }
+
+  return reasoning || content
+}
+
 // Role 配置
 export const createRoleConfig = () => ({
   user: {
@@ -138,7 +153,7 @@ export const getToolDisplayName = (toolName, toolDisplayNames = DEFAULT_TOOL_DIS
 const isToolTraceMessage = (message = {}) => {
   if (message.role === 'tool') return true
   if (message.role !== 'assistant') return false
-  const hasVisibleAnswer = Boolean(message.content || message.reasoning_content)
+  const hasVisibleAnswer = hasVisibleMessageText(message)
   return !hasVisibleAnswer && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
 }
 
@@ -160,20 +175,32 @@ export const shouldRenderToolTrace = (record, toolTraceRecords = []) => {
 }
 
 const buildPlanningItem = ({ record, hasExecution, toolDisplayNames }) => {
-  if (!record?.assistantRenderMode && !hasExecution) {
+  const planningMessage = record?.planningMessage || null
+  const planningContent = getMessageDisplayContent(planningMessage)
+  const hasPlanningContent = Boolean(planningContent)
+
+  if (!record?.assistantRenderMode && !hasExecution && !hasPlanningContent) {
     return null
   }
 
   const enabledToolAPINames = normalizeEnabledToolAPINames(record?.enabledToolAPINames)
   const isPending = Boolean(record?.pending) && !hasExecution
-  const description = enabledToolAPINames.length > 0
-    ? `已启用：${enabledToolAPINames.map((toolName) => getToolDisplayName(toolName, toolDisplayNames)).join('、')}`
-    : (hasExecution ? '已进入工具执行链路' : '工具规划中')
+  const description = hasPlanningContent
+    ? '已生成规划说明'
+    : enabledToolAPINames.length > 0
+      ? `已启用：${enabledToolAPINames.map((toolName) => getToolDisplayName(toolName, toolDisplayNames)).join('、')}`
+      : (hasExecution ? '已进入工具执行链路' : '工具规划中')
 
   return {
     key: `${record?.key || 'tool-trace'}-plan`,
     title: '工具规划',
     description,
+    content: hasPlanningContent ? (
+      <div className="thought-chain-markdown">
+        {renderMarkdown(planningContent)}
+      </div>
+    ) : null,
+    collapsible: hasPlanningContent,
     status: isPending ? 'loading' : 'success',
     blink: isPending
   }
@@ -271,6 +298,28 @@ export const buildDisplayMessages = (records) => {
         toolTraceBuffer = []
       }
       display.push({ type: message.role, key: record.key, record })
+      return
+    }
+
+    if (
+      message.role === 'assistant' &&
+      (
+        record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN ||
+        record.planningMessage ||
+        (Array.isArray(record.toolTraceRecords) && record.toolTraceRecords.length > 0)
+      )
+    ) {
+      if (toolTraceBuffer.length > 0) {
+        display.push({ type: 'tool_trace', key: `tool-trace-${toolTraceBuffer[0].key}`, toolTraceRecords: toolTraceBuffer })
+        toolTraceBuffer = []
+      }
+
+      display.push({
+        type: 'assistant',
+        key: record.key,
+        record,
+        toolTraceRecords: record.toolTraceRecords || []
+      })
       return
     }
 

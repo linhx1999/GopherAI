@@ -86,6 +86,7 @@ export const MESSAGE_ROLES = {
   USER: 'user',
   AI: 'ai',
   ASSISTANT: 'assistant',
+  TOOL: 'tool',
   SYSTEM: 'system',
 }
 

@@ -136,7 +136,8 @@ type Message struct {
 
 - 实时 SSE 消息使用 `renderMode=stream`，历史消息使用 `renderMode=instant`
 - 未启用工具时，`reasoning_content` 使用 `Think` 展示
-- 启用工具后，前端将 `assistant(tool_calls)`、`tool`、最终 `assistant` 重建为 `ThoughtChain`
+- 启用工具后，前端按“单轮回答”聚合流式事件：工具调用前的 assistant 规划文本进入 `ThoughtChain` 的“工具规划”节点，随后把 `assistant(tool_calls)`、`tool`、最终 `assistant` 合并为同一轮展示
+- 仅携带 `finish_reason` 等 metadata 的空 assistant chunk 不应单独渲染成气泡，而应只用于结束当前工具调用阶段或最终回答阶段
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
 - 示例 MCP 代码中不再内置 `get_weather` 工具；如需新增 MCP 工具，应在 `common/mcp/server/server.go` 明确注册
