@@ -17,7 +17,7 @@ const resolveToolIcon = (tool) => {
   if (tool?.category === 'rag' || tool?.apiName === 'knowledge_search') {
     return SearchOutlined
   }
-  if (tool?.apiName === 'sequential_thinking' || tool?.apiName === 'sequentialthinking') {
+  if (tool?.apiName === 'sequential_thinking') {
     return BulbOutlined
   }
   if (tool?.category === 'mcp') {

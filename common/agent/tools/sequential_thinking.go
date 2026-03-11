@@ -11,7 +11,6 @@ import (
 
 const (
 	sequentialThinkingToolName        = "sequential_thinking"
-	legacySequentialThinkingToolName  = "sequentialthinking"
 	sequentialThinkingToolDisplayName = "逐步思考"
 	sequentialThinkingToolDescription = "使用逐步思考流程拆解复杂问题，输出结构化的思考过程和中间结论。"
 )

@@ -209,13 +209,7 @@ func NormalizeToolNames(names []string) []string {
 }
 
 func normalizeToolName(name string) string {
-	trimmedName := strings.TrimSpace(name)
-	switch trimmedName {
-	case legacySequentialThinkingToolName:
-		return sequentialThinkingToolName
-	default:
-		return trimmedName
-	}
+	return strings.TrimSpace(name)
 }
 
 func (r *ToolRegistry) resolveMCPTool(ctx context.Context, toolName string) (tool.BaseTool, bool) {

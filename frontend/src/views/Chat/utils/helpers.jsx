@@ -30,8 +30,7 @@ export const renderMarkdown = (content) => <XMarkdown content={content} />
 
 const DEFAULT_TOOL_DISPLAY_NAMES = {
   knowledge_search: '知识库检索',
-  sequential_thinking: '逐步思考',
-  sequentialthinking: '逐步思考'
+  sequential_thinking: '逐步思考'
 }
 
 // Role 配置
