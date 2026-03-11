@@ -107,7 +107,7 @@ const FileTable = ({
                 type="primary"
                 size="small"
                 icon={<CloudUploadOutlined />}
-                onClick={() => onCreateIndex(record.id)}
+                onClick={() => onCreateIndex(record.file_id)}
               >
                 索引
               </Button>
@@ -119,7 +119,7 @@ const FileTable = ({
               <Button
                 size="small"
                 icon={<ReloadOutlined />}
-                onClick={() => onRemoveIndex(record.id)}
+                onClick={() => onRemoveIndex(record.file_id)}
               >
                 删除索引
               </Button>
@@ -129,7 +129,7 @@ const FileTable = ({
           <Popconfirm
             title="确定要删除这个文件吗？"
             description="删除后将无法恢复，同时会删除相关索引。"
-            onConfirm={() => onRemoveFile(record.id)}
+            onConfirm={() => onRemoveFile(record.file_id)}
             okText="确定"
             cancelText="取消"
           >
@@ -148,7 +148,7 @@ const FileTable = ({
     <Table
       columns={columns}
       dataSource={files}
-      rowKey="id"
+      rowKey="file_id"
       loading={loading}
       scroll={{ x: 920 }}
       locale={{

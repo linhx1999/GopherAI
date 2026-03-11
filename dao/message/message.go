@@ -28,20 +28,20 @@ func GetAllMessages() ([]model.Message, error) {
 }
 
 // GetNextMessageIndex 获取下一条消息的索引
-func GetNextMessageIndex(sessionID string) (int, error) {
+func GetNextMessageIndex(sessionRefID uint) (int, error) {
 	var maxIndex int
 	err := postgres.DB.Model(&model.Message{}).
-		Where("session_id = ?", sessionID).
+		Where("session_ref_id = ?", sessionRefID).
 		Select("COALESCE(MAX(\"index\"), -1)").
 		Scan(&maxIndex).Error
 	return maxIndex + 1, err
 }
 
-// ListMessagesBySessionAndUserOrdered 按索引获取指定用户的会话消息列表
-func ListMessagesBySessionAndUserOrdered(sessionID string, userName string) ([]model.Message, error) {
+// ListMessagesBySessionRefIDAndUserRefIDOrdered 按索引获取指定用户的会话消息列表
+func ListMessagesBySessionRefIDAndUserRefIDOrdered(sessionRefID uint, userRefID uint) ([]model.Message, error) {
 	var msgs []model.Message
 	err := postgres.DB.
-		Where("session_id = ? AND user_name = ?", sessionID, userName).
+		Where("session_ref_id = ? AND user_ref_id = ?", sessionRefID, userRefID).
 		Order("\"index\" asc").
 		Find(&msgs).Error
 	return msgs, err
@@ -51,7 +51,7 @@ func ListMessagesBySessionAndUserOrdered(sessionID string, userName string) ([]m
 func CreateMessageWithIndex(msg *model.Message) error {
 	// 如果没有指定索引，自动获取下一个索引
 	if msg.Index == 0 {
-		nextIndex, err := GetNextMessageIndex(msg.SessionID)
+		nextIndex, err := GetNextMessageIndex(msg.SessionRefID)
 		if err != nil {
 			return err
 		}
@@ -61,15 +61,20 @@ func CreateMessageWithIndex(msg *model.Message) error {
 }
 
 // GetMessageByIndex 根据索引获取消息
-func GetMessageByIndex(sessionID string, index int) (*model.Message, error) {
+func GetMessageByIndex(sessionRefID uint, index int) (*model.Message, error) {
 	var msg model.Message
 	err := postgres.DB.
-		Where("session_id = ? AND \"index\" = ?", sessionID, index).
+		Where("session_ref_id = ? AND \"index\" = ?", sessionRefID, index).
 		First(&msg).Error
 	if err != nil {
 		return nil, err
 	}
 	return &msg, nil
+}
+
+// DeleteBySessionRefID 删除指定会话的消息记录。
+func DeleteBySessionRefID(sessionRefID uint) error {
+	return postgres.DB.Where("session_ref_id = ?", sessionRefID).Delete(&model.Message{}).Error
 }
 
 // GetCachedMessages 获取会话消息缓存。

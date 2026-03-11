@@ -58,7 +58,7 @@ func buildToolSignature(enabledToolNames []string) string {
 	return strings.Join(normalizedNames, ",")
 }
 
-func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userName string, enabledToolNames []string, thinkingMode bool) (*AgentSessionConfig, error) {
+func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID uint, enabledToolNames []string, thinkingMode bool) (*AgentSessionConfig, error) {
 	client := llm.GetLLMClient()
 	if client == nil {
 		return nil, fmt.Errorf("llm client not initialized")
@@ -72,15 +72,15 @@ func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userName s
 		return nil, fmt.Errorf("llm model not available")
 	}
 
-	fileIDs, err := file.GetIndexedFileIDsByUserName(userName)
+	fileRefIDs, err := file.GetIndexedFileRefIDsByUserRefID(userRefID)
 	if err != nil {
 		log.Printf("Warning: failed to get indexed file ids: %v", err)
-		fileIDs = []uint{}
+		fileRefIDs = []uint{}
 	}
 
 	registry := tools.GetToolRegistry()
 	normalizedToolNames := tools.NormalizeToolNames(enabledToolNames)
-	toolInstances, err := registry.ResolveTools(ctx, normalizedToolNames, fileIDs)
+	toolInstances, err := registry.ResolveTools(ctx, normalizedToolNames, fileRefIDs)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tools failed: %w", err)
 	}
@@ -115,8 +115,8 @@ func (m *AgentManager) buildAgent(ctx context.Context, config *AgentSessionConfi
 }
 
 // GetOrCreateAgentForChat 获取或创建指定模型和工具配置的 Agent。
-func (m *AgentManager) GetOrCreateAgentForChat(ctx context.Context, sessionID string, userName string, enabledToolNames []string, thinkingMode bool) (*react.Agent, error) {
-	config, err := m.resolveAgentSessionConfig(ctx, userName, enabledToolNames, thinkingMode)
+func (m *AgentManager) GetOrCreateAgentForChat(ctx context.Context, sessionID string, userRefID uint, enabledToolNames []string, thinkingMode bool) (*react.Agent, error) {
+	config, err := m.resolveAgentSessionConfig(ctx, userRefID, enabledToolNames, thinkingMode)
 	if err != nil {
 		return nil, err
 	}

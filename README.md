@@ -63,22 +63,24 @@ pnpm dev
 - `POST /api/v1/agent/*` 的 `tools` 表示“本次请求显式启用的工具列表”
 - SSE 除 `meta` / `error` 外，`data` 直接发送完整的 `schema.Message` JSON
 - 流结束后服务端追加 `data: [DONE]`
-- 历史消息接口返回 `{ index, message, created_at }`，其中 `message` 为完整 `schema.Message`
+- 历史消息接口返回 `{ message_id, index, message, created_at }`，其中 `message` 为完整 `schema.Message`
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，保证非流式生成后立即刷新也能读到最新 `reasoning_content`
 - 后端通过领域 DAO 访问 Redis；service 只负责决定何时读写缓存与何时回源 PostgreSQL
-- Session 表采用 `gorm.Model` 作为数据库主键与时间字段；对外仍统一使用 UUID 类型的业务 `session_id`
+- 持久化模型统一采用“`gorm.Model` + 业务 UUID”双标识；数据库内部关联走数值 ID，对外接口统一使用业务 UUID
 - Session 模型不持久化工具列表；工具启用状态仅来自当前请求的 `tools`
 - 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 - 前端基于 Ant Design 6 开发时，优先使用 `variant`、`orientation` 等新属性，避免继续使用 `bordered`、`direction` 这类已弃用 API
 
-## Session 模型说明
+## 标识模型说明
 
-- 数据库层：`sessions.id` 为 `gorm.Model` 提供的自增主键
-- 业务层：`sessions.session_id` 为 UUID，会话接口、消息链路、前端状态绑定都使用该字段
+- 数据库层：`users.id`、`sessions.id`、`files.id`、`document_chunks.id`、`messages.id` 都是 `gorm.Model` 提供的自增主键
+- 业务层：`user_id`、`session_id`、`file_id`、`chunk_id`、`message_id` 都是 UUID；前端和 HTTP API 只使用这些业务标识
+- 内部关联：`user_ref_id`、`session_ref_id`、`file_ref_id` 仅作为普通索引字段使用，不建立数据库外键约束
 - `Session` 仅存储会话元数据，不保存工具开关；每轮可用工具由请求体 `tools` 决定
-- 旧版字符串主键 `sessions` 表不会做数据兼容；服务启动时检测到旧结构会直接删除并按新模型重建
+- 历史消息、文件管理、JWT 认证都基于业务 UUID 入参，再在后端解析到内部数值 ID
+- 旧版标识结构不做数据兼容；服务启动时检测到旧结构会直接删除相关表并按新模型重建
 
 ### SSE 示例
 
@@ -107,15 +109,15 @@ data: [DONE]
 | GET | `/api/v1/agent/:session_id/messages` | 会话消息 |
 | GET | `/api/v1/tools` | 工具列表 |
 | GET | `/api/v1/sessions` | 会话列表 |
-| DELETE | `/api/v1/sessions/:id` | 删除会话 |
-| PUT | `/api/v1/sessions/:id/title` | 更新标题 |
+| DELETE | `/api/v1/sessions/:session_id` | 删除会话 |
+| PUT | `/api/v1/sessions/:session_id/title` | 更新标题 |
 | POST | `/api/v1/file/upload` | 上传文件 |
 | GET | `/api/v1/file/list` | 文件列表 |
-| GET | `/api/v1/file/url/:id` | 文件访问 URL |
-| GET | `/api/v1/file/download/:id` | 下载文件 |
-| DELETE | `/api/v1/file/:id` | 删除文件 |
-| POST | `/api/v1/file/index/:id` | 创建索引 |
-| DELETE | `/api/v1/file/index/:id` | 删除索引 |
+| GET | `/api/v1/file/url/:file_id` | 文件访问 URL |
+| GET | `/api/v1/file/download/:file_id` | 下载文件 |
+| DELETE | `/api/v1/file/:file_id` | 删除文件 |
+| POST | `/api/v1/file/index/:file_id` | 创建索引 |
+| DELETE | `/api/v1/file/index/:file_id` | 删除索引 |
 
 ## 配置说明
 

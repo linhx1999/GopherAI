@@ -13,7 +13,7 @@ import (
 
 // RAGTool RAG 检索工具
 type RAGTool struct {
-	fileIDs []uint // 可检索的文件 ID 列表
+	fileRefIDs []uint // 可检索的文件内部 ID 列表
 }
 
 // RAGToolParams RAG 工具参数
@@ -67,7 +67,7 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	}
 
 	// 4. 如果没有可检索的文件，返回提示
-	if len(t.fileIDs) == 0 {
+	if len(t.fileRefIDs) == 0 {
 		result := RAGToolResult{
 			Documents: []string{},
 			Count:     0,
@@ -77,7 +77,7 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	}
 
 	// 5. 执行检索
-	docs, err := rag.RetrieveDocumentsFromMultipleFiles(ctx, t.fileIDs, params.Query, params.TopK)
+	docs, err := rag.RetrieveDocumentsFromMultipleFiles(ctx, t.fileRefIDs, params.Query, params.TopK)
 	if err != nil {
 		return "", fmt.Errorf("rag retrieve failed: %w", err)
 	}
@@ -100,6 +100,6 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 }
 
 // NewRAGTool 创建 RAG 工具实例
-func NewRAGTool(fileIDs []uint) tool.InvokableTool {
-	return &RAGTool{fileIDs: fileIDs}
+func NewRAGTool(fileRefIDs []uint) tool.InvokableTool {
+	return &RAGTool{fileRefIDs: fileRefIDs}
 }

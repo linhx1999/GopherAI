@@ -32,10 +32,10 @@ func SetupAgentRoutes(r *gin.RouterGroup) {
 		// GET /api/v1/sessions - 获取会话列表
 		sessions.GET("", sessionController.GetUserSessionsByUserName)
 
-		// DELETE /api/v1/sessions/:id - 删除会话
-		sessions.DELETE("/:id", sessionController.DeleteSession)
+		// DELETE /api/v1/sessions/:session_id - 删除会话
+		sessions.DELETE("/:session_id", sessionController.DeleteSession)
 
-		// PUT /api/v1/sessions/:id/title - 更新会话标题
-		sessions.PUT("/:id/title", sessionController.UpdateSessionTitle)
+		// PUT /api/v1/sessions/:session_id/title - 更新会话标题
+		sessions.PUT("/:session_id/title", sessionController.UpdateSessionTitle)
 	}
 }

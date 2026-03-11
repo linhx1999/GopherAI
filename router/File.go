@@ -9,9 +9,9 @@ import (
 func FileRouter(r *gin.RouterGroup) {
 	r.POST("/upload", file.UploadRagFile)
 	r.GET("/list", file.GetFileList)
-	r.GET("/url/:id", file.GetFileURL)
-	r.GET("/download/:id", file.DownloadFile)
-	r.DELETE("/:id", file.DeleteFile)
-	r.POST("/index/:id", file.IndexFile)
-	r.DELETE("/index/:id", file.DeleteFileIndex)
+	r.GET("/url/:file_id", file.GetFileURL)
+	r.GET("/download/:file_id", file.DownloadFile)
+	r.DELETE("/:file_id", file.DeleteFile)
+	r.POST("/index/:file_id", file.IndexFile)
+	r.DELETE("/index/:file_id", file.DeleteFileIndex)
 }

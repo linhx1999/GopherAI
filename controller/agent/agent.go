@@ -34,7 +34,7 @@ func GenerateHandler(c *gin.Context) {
 
 	result, code_ := agentService.Generate(
 		c.Request.Context(),
-		c.GetString("userName"),
+		c.GetUint("userRefID"),
 		req.SessionID,
 		req.Message,
 		req.Tools,
@@ -70,7 +70,7 @@ func StreamHandler(c *gin.Context) {
 
 	stream, code_ := agentService.Stream(
 		c.Request.Context(),
-		c.GetString("userName"),
+		c.GetUint("userRefID"),
 		req.SessionID,
 		req.Message,
 		req.Tools,
@@ -90,9 +90,9 @@ func StreamHandler(c *gin.Context) {
 // GET /api/v1/agent/:session_id/messages
 func GetMessages(c *gin.Context) {
 	sessionID := c.Param("session_id")
-	userName := c.GetString("userName")
+	userRefID := c.GetUint("userRefID")
 
-	messages, code_ := agentService.ListHistoryMessages(sessionID, userName)
+	messages, code_ := agentService.ListHistoryMessages(sessionID, userRefID)
 	if code_ != code.CodeSuccess {
 		writeCodeResponse(c, code_)
 		return

@@ -2,9 +2,9 @@ package model
 
 import (
 	"encoding/json"
-	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"gorm.io/gorm"
 )
 
 // ToolCall 工具调用记录
@@ -20,15 +20,15 @@ type ToolCalls []ToolCall
 
 // Message 消息模型
 type Message struct {
-	ID        uint            `gorm:"primaryKey;autoIncrement" json:"id"`
-	SessionID string          `gorm:"index;not null;type:varchar(36)" json:"session_id"`
-	UserName  string          `gorm:"type:varchar(20)" json:"username"`
-	Index     int             `gorm:"not null;index:idx_session_index,priority:2" json:"index"` // 线性索引
-	Role      string          `gorm:"type:varchar(20);not null;default:'user'" json:"role"`     // user/assistant
-	Content   string          `gorm:"type:text" json:"content"`
-	Payload   json.RawMessage `gorm:"type:jsonb" json:"payload,omitempty"`    // 完整 schema.Message
-	ToolCalls json.RawMessage `gorm:"type:jsonb" json:"tool_calls,omitempty"` // 工具调用记录
-	CreatedAt time.Time       `json:"created_at"`
+	gorm.Model
+	MessageID    string          `gorm:"column:message_id;type:varchar(36);uniqueIndex;not null" json:"message_id"`
+	SessionRefID uint            `gorm:"column:session_ref_id;not null;index:idx_session_index,priority:1;index" json:"-"`
+	UserRefID    uint            `gorm:"column:user_ref_id;not null;index" json:"-"`
+	Index        int             `gorm:"not null;index:idx_session_index,priority:2" json:"index"` // 线性索引
+	Role         string          `gorm:"type:varchar(20);not null;default:'user'" json:"role"`     // user/assistant
+	Content      string          `gorm:"type:text" json:"content"`
+	Payload      json.RawMessage `gorm:"type:jsonb" json:"payload,omitempty"`    // 完整 schema.Message
+	ToolCalls    json.RawMessage `gorm:"type:jsonb" json:"tool_calls,omitempty"` // 工具调用记录
 }
 
 // GetToolCalls 解析工具调用

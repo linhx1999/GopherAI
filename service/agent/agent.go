@@ -56,7 +56,7 @@ type StreamHandle struct {
 // GenerateRequest 表示一次消息生成请求。
 // 已废弃：保留用于内部 prepareChatExecution，外部调用请使用具体参数。
 type GenerateRequest struct {
-	UserName         string
+	UserRefID        uint
 	SessionID        string
 	UserMessage      string
 	EnabledToolNames []string
@@ -72,14 +72,15 @@ type GenerateResult struct {
 
 // HistoryMessageItem 历史消息项
 type HistoryMessageItem struct {
+	MessageID string          `json:"message_id"`
 	Index     int             `json:"index"`
 	Message   *schema.Message `json:"message"`
 	CreatedAt string          `json:"created_at"`
 }
 
 type preparedChatExecution struct {
-	sessionID                  string
-	userName                   string
+	session                    *model.Session
+	userRefID                  uint
 	conversation               []*schema.Message
 	firstAssistantMessageIndex int
 	agent                      *react.Agent
@@ -107,37 +108,38 @@ func publishMessageToDB(msg *model.Message) {
 }
 
 func appendMessageToCache(msg *model.Message) error {
-	return messageDAO.AppendCachedMessage(msg.SessionID, msg)
+	return nil
 }
 
-func persistMessage(msg *model.Message) {
+func persistMessage(sessionID string, msg *model.Message) {
 	if msg == nil {
 		return
 	}
-	if err := appendMessageToCache(msg); err != nil {
+	if err := messageDAO.AppendCachedMessage(sessionID, msg); err != nil {
 		log.Printf("appendMessageToCache failed: %v", err)
 	}
 	publishMessageToDB(msg)
 }
 
-func buildStoredMessage(sessionID string, userName string, index int, msg *schema.Message) *model.Message {
+func buildStoredMessage(session *model.Session, userRefID uint, index int, msg *schema.Message) *model.Message {
 	stored := &model.Message{
-		SessionID: sessionID,
-		UserName:  userName,
-		Index:     index,
-		CreatedAt: time.Now(),
+		MessageID:    uuid.New().String(),
+		SessionRefID: session.ID,
+		UserRefID:    userRefID,
+		Index:        index,
 	}
+	stored.CreatedAt = time.Now()
 	if err := stored.SetSchemaMessage(msg); err != nil {
 		log.Printf("SetSchemaMessage failed: %v", err)
 	}
 	return stored
 }
 
-func persistProducedMessages(sessionID string, userName string, startIndex int, produced []*schema.Message) int {
+func persistProducedMessages(session *model.Session, userRefID uint, startIndex int, produced []*schema.Message) int {
 	lastIndex := startIndex - 1
 	for i, msg := range produced {
 		index := startIndex + i
-		persistMessage(buildStoredMessage(sessionID, userName, index, msg))
+		persistMessage(session.SessionID, buildStoredMessage(session, userRefID, index, msg))
 		lastIndex = index
 	}
 	return lastIndex
@@ -200,8 +202,8 @@ func isRequestCanceled(ctx context.Context, err error) bool {
 	return strings.Contains(errText, "context canceled") || strings.Contains(errText, "context deadline exceeded")
 }
 
-func checkOwnedSession(sessionID string, userName string) (*model.Session, code.Code) {
-	session, err := sessionDAO.GetSessionByIDAndUserName(sessionID, userName)
+func checkOwnedSession(sessionID string, userRefID uint) (*model.Session, code.Code) {
+	session, err := sessionDAO.GetSessionBySessionIDAndUserRefID(sessionID, userRefID)
 	if err == nil {
 		return session, code.CodeSuccess
 	}
@@ -213,15 +215,15 @@ func checkOwnedSession(sessionID string, userName string) (*model.Session, code.
 }
 
 // loadSessionHistory 从 Redis 获取消息历史，并在缓存未命中时回源数据库。
-func loadSessionHistory(sessionID string, userName string) ([]*model.Message, error) {
-	cachedMessages, err := messageDAO.GetCachedMessages(sessionID)
+func loadSessionHistory(session *model.Session, userRefID uint) ([]*model.Message, error) {
+	cachedMessages, err := messageDAO.GetCachedMessages(session.SessionID)
 	if err != nil {
 		log.Printf("loadSessionHistory redis error: %v", err)
 	} else if len(cachedMessages) > 0 {
 		return cachedMessages, nil
 	}
 
-	dbMessages, err := messageDAO.ListMessagesBySessionAndUserOrdered(sessionID, userName)
+	dbMessages, err := messageDAO.ListMessagesBySessionRefIDAndUserRefIDOrdered(session.ID, userRefID)
 	if err != nil {
 		log.Printf("loadSessionHistory db error: %v", err)
 		return nil, err
@@ -234,7 +236,7 @@ func loadSessionHistory(sessionID string, userName string) ([]*model.Message, er
 
 	if len(history) > 0 {
 		go func() {
-			if err := messageDAO.StoreCachedMessages(sessionID, history); err != nil {
+			if err := messageDAO.StoreCachedMessages(session.SessionID, history); err != nil {
 				log.Printf("loadSessionHistory cache to redis error: %v", err)
 			}
 		}()
@@ -248,6 +250,7 @@ func buildHistoryMessageItems(msgs []*model.Message) []HistoryMessageItem {
 	for _, msg := range msgs {
 		msgCopy := msg
 		items = append(items, HistoryMessageItem{
+			MessageID: msg.MessageID,
 			Index:     msg.Index,
 			Message:   msgCopy.GetSchemaMessage(),
 			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
@@ -256,35 +259,39 @@ func buildHistoryMessageItems(msgs []*model.Message) []HistoryMessageItem {
 	return items
 }
 
-func createSession(userName string, title string) (string, code.Code) {
+func createSession(userRefID uint, title string) (*model.Session, code.Code) {
 	newSession := &model.Session{
 		SessionID: uuid.New().String(),
-		UserName:  userName,
+		UserRefID: userRefID,
 		Title:     title,
 	}
 	createdSession, err := sessionDAO.CreateSession(newSession)
 	if err != nil {
 		log.Println("createSession error:", err)
-		return "", code.CodeServerBusy
+		return nil, code.CodeServerBusy
 	}
-	return createdSession.SessionID, code.CodeSuccess
+	return createdSession, code.CodeSuccess
 }
 
 func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedChatExecution, code.Code) {
-	sessionID := req.SessionID
-	if sessionID == "" {
-		var code_ code.Code
-		sessionID, code_ = createSession(req.UserName, req.UserMessage)
+	var (
+		session *model.Session
+		code_   code.Code
+	)
+
+	if req.SessionID == "" {
+		session, code_ = createSession(req.UserRefID, req.UserMessage)
 		if code_ != code.CodeSuccess {
 			return nil, code_
 		}
 	} else {
-		if _, code_ := checkOwnedSession(sessionID, req.UserName); code_ != code.CodeSuccess {
+		session, code_ = checkOwnedSession(req.SessionID, req.UserRefID)
+		if code_ != code.CodeSuccess {
 			return nil, code_
 		}
 	}
 
-	history, err := loadSessionHistory(sessionID, req.UserName)
+	history, err := loadSessionHistory(session, req.UserRefID)
 	if err != nil {
 		log.Println("prepareChatExecution loadSessionHistory error:", err)
 		return nil, code.CodeServerBusy
@@ -292,9 +299,9 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 
 	userMessageIndex := len(history)
 	userMessage := schema.UserMessage(req.UserMessage)
-	persistMessage(buildStoredMessage(sessionID, req.UserName, userMessageIndex, userMessage))
+	persistMessage(session.SessionID, buildStoredMessage(session, req.UserRefID, userMessageIndex, userMessage))
 
-	agent, err := agentcommon.GetAgentManager().GetOrCreateAgentForChat(ctx, sessionID, req.UserName, req.EnabledToolNames, req.ThinkingMode)
+	agent, err := agentcommon.GetAgentManager().GetOrCreateAgentForChat(ctx, session.SessionID, req.UserRefID, req.EnabledToolNames, req.ThinkingMode)
 	if err != nil {
 		log.Println("prepareChatExecution GetOrCreateAgentForChat error:", err)
 		return nil, code.AIModelFail
@@ -303,8 +310,8 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 	hasEnabledTools := len(req.EnabledToolNames) > 0
 
 	return &preparedChatExecution{
-		sessionID:                  sessionID,
-		userName:                   req.UserName,
+		session:                    session,
+		userRefID:                  req.UserRefID,
 		conversation:               buildConversationMessages(history, userMessage, hasEnabledTools),
 		firstAssistantMessageIndex: userMessageIndex + 1,
 		agent:                      agent,
@@ -312,9 +319,9 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 }
 
 // Generate 同步生成响应。
-func Generate(ctx context.Context, userName, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*GenerateResult, code.Code) {
+func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*GenerateResult, code.Code) {
 	run, code_ := prepareChatExecution(ctx, GenerateRequest{
-		UserName:         userName,
+		UserRefID:        userRefID,
 		SessionID:        sessionID,
 		UserMessage:      userMessage,
 		EnabledToolNames: enabledToolNames,
@@ -337,7 +344,7 @@ func Generate(ctx context.Context, userName, sessionID, userMessage string, enab
 		produced = append(produced, finalMessage)
 	}
 
-	lastIndex := persistProducedMessages(run.sessionID, run.userName, run.firstAssistantMessageIndex, produced)
+	lastIndex := persistProducedMessages(run.session, run.userRefID, run.firstAssistantMessageIndex, produced)
 	if finalMessage == nil && len(produced) > 0 {
 		finalMessage = produced[len(produced)-1]
 	}
@@ -349,16 +356,16 @@ func Generate(ctx context.Context, userName, sessionID, userMessage string, enab
 	}
 
 	return &GenerateResult{
-		SessionID:    run.sessionID,
+		SessionID:    run.session.SessionID,
 		MessageIndex: lastIndex,
 		Message:      finalMessage,
 	}, code.CodeSuccess
 }
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
-func Stream(ctx context.Context, userName, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
+func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
 	run, code_ := prepareChatExecution(ctx, GenerateRequest{
-		UserName:         userName,
+		UserRefID:        userRefID,
 		SessionID:        sessionID,
 		UserMessage:      userMessage,
 		EnabledToolNames: enabledToolNames,
@@ -375,7 +382,7 @@ func Stream(ctx context.Context, userName, sessionID, userMessage string, enable
 		if err := emitEvent(ctx, events, StreamEvent{
 			Meta: &StreamMeta{
 				Type:         StreamPayloadTypeMeta,
-				SessionID:    run.sessionID,
+				SessionID:    run.session.SessionID,
 				MessageIndex: run.firstAssistantMessageIndex,
 			},
 		}); err != nil {
@@ -395,22 +402,23 @@ func Stream(ctx context.Context, userName, sessionID, userMessage string, enable
 			return
 		}
 
-		persistProducedMessages(run.sessionID, run.userName, run.firstAssistantMessageIndex, produced)
+		persistProducedMessages(run.session, run.userRefID, run.firstAssistantMessageIndex, produced)
 	}()
 
 	return &StreamHandle{
-		SessionID: run.sessionID,
+		SessionID: run.session.SessionID,
 		Events:    events,
 	}, code.CodeSuccess
 }
 
 // ListHistoryMessages 获取当前用户的会话消息列表。
-func ListHistoryMessages(sessionID string, userName string) ([]HistoryMessageItem, code.Code) {
-	if _, code_ := checkOwnedSession(sessionID, userName); code_ != code.CodeSuccess {
+func ListHistoryMessages(sessionID string, userRefID uint) ([]HistoryMessageItem, code.Code) {
+	session, code_ := checkOwnedSession(sessionID, userRefID)
+	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
 
-	msgs, err := loadSessionHistory(sessionID, userName)
+	msgs, err := loadSessionHistory(session, userRefID)
 	if err != nil {
 		log.Println("ListHistoryMessages error:", err)
 		return nil, code.CodeServerBusy

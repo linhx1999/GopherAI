@@ -18,7 +18,7 @@ import (
 )
 
 // UploadRagFile 上传 RAG 文件到 MinIO 并创建索引
-func UploadRagFile(username string, fileHeader *multipart.FileHeader) (*model.File, error) {
+func UploadRagFile(userRefID uint, username string, fileHeader *multipart.FileHeader) (*model.File, error) {
 	// 校验文件类型和文件名
 	if err := utils.ValidateFile(fileHeader); err != nil {
 		log.Printf("File validation failed: %v", err)
@@ -54,7 +54,8 @@ func UploadRagFile(username string, fileHeader *multipart.FileHeader) (*model.Fi
 
 	// 创建文件元数据记录
 	fileRecord := &model.File{
-		UserName:   username,
+		FileID:     utils.GenerateUUID(),
+		UserRefID:  userRefID,
 		FileName:   fileHeader.Filename,
 		ObjectName: objectName,
 		FileSize:   fileHeader.Size,
@@ -103,16 +104,16 @@ func UploadRagFile(username string, fileHeader *multipart.FileHeader) (*model.Fi
 }
 
 // GetFileList 获取用户文件列表
-func GetFileList(username string) ([]model.File, error) {
-	return file.GetByUserName(username)
+func GetFileList(userRefID uint) ([]model.File, error) {
+	return file.GetByUserRefID(userRefID)
 }
 
 // DeleteFile 删除文件（MinIO 对象 + 数据库记录 + Redis 索引）
-func DeleteFile(id uint, username string) error {
+func DeleteFile(fileID string, userRefID uint) error {
 	ctx := context.Background()
 
 	// 获取文件记录（同时校验用户权限）
-	fileRecord, err := file.GetByIDAndUserName(id, username)
+	fileRecord, err := file.GetByFileIDAndUserRefID(fileID, userRefID)
 	if err != nil {
 		return err
 	}
@@ -133,7 +134,7 @@ func DeleteFile(id uint, username string) error {
 	}
 
 	// 删除数据库记录
-	if err := file.Delete(id); err != nil {
+	if err := file.DeleteByRefID(fileRecord.ID); err != nil {
 		log.Printf("Failed to delete file record: %v", err)
 		return err
 	}
@@ -143,8 +144,8 @@ func DeleteFile(id uint, username string) error {
 }
 
 // GetFileURL 获取文件访问 URL
-func GetFileURL(id uint, username string) (string, error) {
-	fileRecord, err := file.GetByIDAndUserName(id, username)
+func GetFileURL(fileID string, userRefID uint) (string, error) {
+	fileRecord, err := file.GetByFileIDAndUserRefID(fileID, userRefID)
 	if err != nil {
 		return "", err
 	}
@@ -162,8 +163,8 @@ func GetFileURL(id uint, username string) (string, error) {
 }
 
 // DownloadFileContent 下载文件内容
-func DownloadFileContent(id uint, username string) (io.ReadCloser, *model.File, error) {
-	fileRecord, err := file.GetByIDAndUserName(id, username)
+func DownloadFileContent(fileID string, userRefID uint) (io.ReadCloser, *model.File, error) {
+	fileRecord, err := file.GetByFileIDAndUserRefID(fileID, userRefID)
 	if err != nil {
 		return nil, nil, err
 	}

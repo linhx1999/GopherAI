@@ -3,12 +3,11 @@ package session
 import (
 	"GopherAI/common/postgres"
 	"GopherAI/model"
-	"log"
 )
 
-func GetSessionsByUserName(userName string) ([]model.Session, error) {
+func GetSessionsByUserRefID(userRefID uint) ([]model.Session, error) {
 	var sessions []model.Session
-	err := postgres.DB.Where("user_name = ?", userName).Order("created_at DESC").Find(&sessions).Error
+	err := postgres.DB.Where("user_ref_id = ?", userRefID).Order("created_at DESC").Find(&sessions).Error
 	return sessions, err
 }
 
@@ -17,10 +16,10 @@ func CreateSession(session *model.Session) (*model.Session, error) {
 	return session, err
 }
 
-func GetSessionByIDAndUserName(sessionID string, userName string) (*model.Session, error) {
+func GetSessionBySessionIDAndUserRefID(sessionID string, userRefID uint) (*model.Session, error) {
 	var session model.Session
 	err := postgres.DB.
-		Where("session_id = ? AND user_name = ?", sessionID, userName).
+		Where("session_id = ? AND user_ref_id = ?", sessionID, userRefID).
 		First(&session).Error
 	if err != nil {
 		return nil, err
@@ -28,9 +27,9 @@ func GetSessionByIDAndUserName(sessionID string, userName string) (*model.Sessio
 	return &session, nil
 }
 
-func DeleteSessionByIDAndUserName(sessionID string, userName string) (bool, error) {
+func DeleteSessionBySessionIDAndUserRefID(sessionID string, userRefID uint) (bool, error) {
 	result := postgres.DB.
-		Where("session_id = ? AND user_name = ?", sessionID, userName).
+		Where("session_id = ? AND user_ref_id = ?", sessionID, userRefID).
 		Delete(&model.Session{})
 	if result.Error != nil {
 		return false, result.Error
@@ -38,12 +37,10 @@ func DeleteSessionByIDAndUserName(sessionID string, userName string) (bool, erro
 	return result.RowsAffected > 0, nil
 }
 
-func UpdateSessionTitleByIDAndUserName(sessionID string, userName string, title string) (bool, error) {
+func UpdateSessionTitleBySessionIDAndUserRefID(sessionID string, userRefID uint, title string) (bool, error) {
 	result := postgres.DB.Model(&model.Session{}).
-		Where("session_id = ? AND user_name = ?", sessionID, userName).
+		Where("session_id = ? AND user_ref_id = ?", sessionID, userRefID).
 		Update("title", title)
-	log.Printf("UpdateSessionTitle: sessionID=%s, userName=%s, title=%s, rowsAffected=%d, error=%v\n",
-		sessionID, userName, title, result.RowsAffected, result.Error)
 	if result.Error != nil {
 		return false, result.Error
 	}

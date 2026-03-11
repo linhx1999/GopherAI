@@ -4,17 +4,18 @@ import (
 	"log"
 	"time"
 
+	agentcommon "GopherAI/common/agent"
 	"GopherAI/common/code"
 	messageDAO "GopherAI/dao/message"
 	"GopherAI/dao/session"
 	"GopherAI/model"
 )
 
-// GetUserSessionsByUserName 获取用户会话列表
-func GetUserSessionsByUserName(userName string) ([]model.SessionInfo, error) {
-	sessions, err := session.GetSessionsByUserName(userName)
+// GetUserSessionsByUserRefID 获取用户会话列表
+func GetUserSessionsByUserRefID(userRefID uint) ([]model.SessionInfo, error) {
+	sessions, err := session.GetSessionsByUserRefID(userRefID)
 	if err != nil {
-		log.Println("GetUserSessionsByUserName error:", err)
+		log.Println("GetUserSessionsByUserRefID error:", err)
 		return nil, err
 	}
 
@@ -31,8 +32,22 @@ func GetUserSessionsByUserName(userName string) ([]model.SessionInfo, error) {
 }
 
 // DeleteSession 删除会话
-func DeleteSession(userName string, sessionID string) code.Code {
-	deleted, err := session.DeleteSessionByIDAndUserName(sessionID, userName)
+func DeleteSession(userRefID uint, sessionID string) code.Code {
+	targetSession, err := session.GetSessionBySessionIDAndUserRefID(sessionID, userRefID)
+	if err != nil {
+		log.Println("DeleteSession lookup error:", err)
+		return code.CodeServerBusy
+	}
+	if targetSession == nil {
+		return code.CodeSessionNotFound
+	}
+
+	if err := messageDAO.DeleteBySessionRefID(targetSession.ID); err != nil {
+		log.Println("DeleteSession delete messages error:", err)
+		return code.CodeServerBusy
+	}
+
+	deleted, err := session.DeleteSessionBySessionIDAndUserRefID(sessionID, userRefID)
 	if err != nil {
 		log.Println("DeleteSession error:", err)
 		return code.CodeServerBusy
@@ -42,13 +57,14 @@ func DeleteSession(userName string, sessionID string) code.Code {
 	}
 
 	_ = messageDAO.DeleteCachedMessages(sessionID)
+	agentcommon.GetAgentManager().ClearAgent(sessionID)
 
 	return code.CodeSuccess
 }
 
 // UpdateSessionTitle 更新会话标题
-func UpdateSessionTitle(userName string, sessionID string, title string) code.Code {
-	updated, err := session.UpdateSessionTitleByIDAndUserName(sessionID, userName, title)
+func UpdateSessionTitle(userRefID uint, sessionID string, title string) code.Code {
+	updated, err := session.UpdateSessionTitleBySessionIDAndUserRefID(sessionID, userRefID, title)
 	if err != nil {
 		log.Println("UpdateSessionTitle error:", err)
 		return code.CodeServerBusy

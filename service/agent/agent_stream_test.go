@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"gorm.io/gorm"
 
 	"GopherAI/model"
 )
@@ -64,16 +65,18 @@ func TestBuildConversationMessagesUsesStoredSchemaPayload(t *testing.T) {
 func TestBuildHistoryMessageItemsPreservesReasoningContent(t *testing.T) {
 	items := buildHistoryMessageItems([]*model.Message{
 		{
-			SessionID: "sess_1",
-			UserName:  "alice",
+			Model:     gorm.Model{CreatedAt: time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)},
+			MessageID: "msg_1",
 			Index:     1,
-			CreatedAt: time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
 			Payload:   []byte(`{"role":"assistant","content":"答案","reasoning_content":"先思考"}`),
 		},
 	})
 
 	if len(items) != 1 {
 		t.Fatalf("unexpected item count: %d", len(items))
+	}
+	if items[0].MessageID != "msg_1" {
+		t.Fatalf("unexpected message_id: %q", items[0].MessageID)
 	}
 	if items[0].Index != 1 {
 		t.Fatalf("unexpected index: %d", items[0].Index)

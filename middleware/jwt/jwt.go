@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"GopherAI/common/code"
+	"GopherAI/common/postgres"
 	"GopherAI/controller"
 	"GopherAI/utils/myjwt"
 	"log"
@@ -32,14 +33,23 @@ func Auth() gin.HandlerFunc {
 		}
 
 		log.Println("token is ", token)
-		userName, ok := myjwt.ParseToken(token)
+		claims, ok := myjwt.ParseToken(token)
 		if !ok {
 			c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
 			c.Abort()
 			return
 		}
 
-		c.Set("userName", userName)
+		user, err := postgres.GetUserByUserID(claims.UserID)
+		if err != nil || user == nil {
+			c.JSON(http.StatusOK, res.CodeOf(code.CodeInvalidToken))
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", user.UserID)
+		c.Set("userRefID", user.ID)
+		c.Set("userName", user.Username)
 		c.Next()
 	}
 }

@@ -110,22 +110,26 @@ GopherAI/
 
 ```go
 type Message struct {
-    SessionID string
-    Index     int
-    Role      string
-    Content   string
-    Payload   json.RawMessage
-    ToolCalls json.RawMessage
+    MessageID    string
+    SessionRefID uint
+    UserRefID    uint
+    Index        int
+    Role         string
+    Content      string
+    Payload      json.RawMessage
+    ToolCalls    json.RawMessage
 }
 ```
 
-### Session 模型约定
+### 模型标识约定
 
-- `model.Session` 使用 `gorm.Model` 管理数据库主键、时间字段和软删除
-- 对外会话标识统一使用 `Session.SessionID`（UUID），HTTP `session_id`、前端 `sessionId`、消息表 `Message.SessionID` 都基于该业务字段
+- `User`、`Session`、`File`、`DocumentChunk`、`Message` 全部使用 `gorm.Model` 管理数据库主键、时间字段和软删除
+- 每个模型都保留独立业务 UUID：`user_id`、`session_id`、`file_id`、`chunk_id`、`message_id`
+- 数据库内部关联统一使用数值字段：`user_ref_id`、`session_ref_id`、`file_ref_id`
+- 项目不使用数据库外键约束；一致性由 service/dao 显式校验与删除顺序保证
+- controller / service / 前端不能暴露数据库自增主键；公开接口只接收和返回业务 UUID
 - `Session` 只保存会话元数据，不持久化工具列表；工具开关完全由请求级 `tools` 决定
-- DAO 查询、删除、改标题必须按 `session_id + user_name` 过滤，不能再把数据库自增主键暴露到业务层
-- 该模型不兼容旧的字符串主键 `sessions` 表；启动时若检测到旧结构，应直接删除旧表并按新模型重建
+- 旧标识结构不做兼容；启动时若检测到旧结构，应直接删除相关表并按新模型重建
 
 ### 3. 前端聊天渲染约定
 
@@ -165,15 +169,15 @@ type Message struct {
 | GET | `/api/v1/agent/:session_id/messages` | 会话消息 |
 | GET | `/api/v1/tools` | 工具列表 |
 | GET | `/api/v1/sessions` | 会话列表 |
-| DELETE | `/api/v1/sessions/:id` | 删除会话 |
-| PUT | `/api/v1/sessions/:id/title` | 更新标题 |
+| DELETE | `/api/v1/sessions/:session_id` | 删除会话 |
+| PUT | `/api/v1/sessions/:session_id/title` | 更新标题 |
 | POST | `/api/v1/file/upload` | 上传文件 |
 | GET | `/api/v1/file/list` | 文件列表 |
-| GET | `/api/v1/file/url/:id` | 获取文件 URL |
-| GET | `/api/v1/file/download/:id` | 下载文件 |
-| DELETE | `/api/v1/file/:id` | 删除文件 |
-| POST | `/api/v1/file/index/:id` | 创建索引 |
-| DELETE | `/api/v1/file/index/:id` | 删除索引 |
+| GET | `/api/v1/file/url/:file_id` | 获取文件 URL |
+| GET | `/api/v1/file/download/:file_id` | 下载文件 |
+| DELETE | `/api/v1/file/:file_id` | 删除文件 |
+| POST | `/api/v1/file/index/:file_id` | 创建索引 |
+| DELETE | `/api/v1/file/index/:file_id` | 删除索引 |
 
 ### Agent 接口约定
 
@@ -181,6 +185,7 @@ type Message struct {
 - SSE `data` 直接传 `schema.Message` JSON，不再拆分自定义 delta 事件
 - 历史消息接口只允许读取当前用户自己的会话；前端直接读取 `response.data.data.messages`
 - 会话列表接口只返回当前用户会话；前端直接读取 `response.data.data.sessions`
+- 历史消息项新增 `message_id`；文件列表与文件操作统一使用 `file_id`
 
 ## 配置说明
 

@@ -4,6 +4,7 @@ import (
 	"GopherAI/config"
 	"GopherAI/model"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +58,10 @@ func InitPostgres() error {
 	// 启用 pgvector 扩展
 	if err := DB.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
 		return fmt.Errorf("failed to enable pgvector: %w", err)
+	}
+
+	if err := resetLegacyTables(); err != nil {
+		return fmt.Errorf("failed to reset legacy tables: %w", err)
 	}
 
 	// 自动迁移数据库表
@@ -115,4 +120,49 @@ func GetUserByUsername(username string) (*model.User, error) {
 	user := new(model.User)
 	err := DB.Where("username = ?", username).First(user).Error
 	return user, err
+}
+
+// GetUserByUserID 根据业务 UserID 查询用户
+func GetUserByUserID(userID string) (*model.User, error) {
+	user := new(model.User)
+	err := DB.Where("user_id = ?", userID).First(user).Error
+	return user, err
+}
+
+func resetLegacyTables() error {
+	tableColumns := map[string][]string{
+		"users":           {"id", "user_id", "username"},
+		"sessions":        {"id", "session_id", "user_ref_id"},
+		"files":           {"id", "file_id", "user_ref_id"},
+		"document_chunks": {"id", "chunk_id", "file_ref_id"},
+		"messages":        {"id", "message_id", "session_ref_id", "user_ref_id"},
+	}
+
+	for table, columns := range tableColumns {
+		if !DB.Migrator().HasTable(table) {
+			continue
+		}
+		for _, column := range columns {
+			if DB.Migrator().HasColumn(table, column) {
+				continue
+			}
+			log.Printf("detected legacy schema on table %s, dropping identity-related tables", table)
+			return dropIdentityTables()
+		}
+	}
+
+	return nil
+}
+
+func dropIdentityTables() error {
+	tables := []string{"messages", "document_chunks", "files", "sessions", "users"}
+	for _, table := range tables {
+		if !DB.Migrator().HasTable(table) {
+			continue
+		}
+		if err := DB.Migrator().DropTable(table); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	redisCli "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -34,6 +35,7 @@ func IsExistUser(username string) (bool, *model.User) {
 
 func Register(username, email, password string) (*model.User, bool) {
 	if user, err := postgres.InsertUser(&model.User{
+		UserID:   uuid.New().String(),
 		Email:    email,
 		Name:     username,
 		Username: username,

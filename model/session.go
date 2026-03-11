@@ -8,7 +8,7 @@ import (
 type Session struct {
 	gorm.Model
 	SessionID string `gorm:"column:session_id;type:varchar(36);uniqueIndex;not null" json:"session_id"`
-	UserName  string `gorm:"index;not null" json:"username"`
+	UserRefID uint   `gorm:"column:user_ref_id;index;not null" json:"-"`
 	Title     string `gorm:"type:varchar(100)" json:"title"`
 }
 

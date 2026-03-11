@@ -22,7 +22,7 @@ func Login(username, password string) (string, code.Code) {
 		return "", code.CodeInvalidPassword
 	}
 	//3:返回一个Token
-	token, err := myjwt.GenerateToken(userInformation.ID, userInformation.Username)
+	token, err := myjwt.GenerateToken(userInformation.UserID, userInformation.Username)
 
 	if err != nil {
 		return "", code.CodeServerBusy
@@ -59,7 +59,7 @@ func Register(email, password, captcha string) (string, code.Code) {
 	}
 
 	// 6:生成Token
-	token, err := myjwt.GenerateToken(userInformation.ID, userInformation.Username)
+	token, err := myjwt.GenerateToken(userInformation.UserID, userInformation.Username)
 
 	if err != nil {
 		return "", code.CodeServerBusy

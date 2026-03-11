@@ -10,11 +10,12 @@ import (
 	"os"
 	"strings"
 
-	embeddingArk "github.com/cloudwego/eino-ext/components/embedding/ark"
 	splitterMarkdown "github.com/cloudwego/eino-ext/components/document/transformer/splitter/markdown"
 	splitterRecursive "github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive"
+	embeddingArk "github.com/cloudwego/eino-ext/components/embedding/ark"
 	"github.com/cloudwego/eino/components/document"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -22,7 +23,7 @@ import (
 type RAGIndexer struct {
 	embedding   *embeddingArk.Embedder
 	splitter    document.Transformer
-	fileID      uint
+	fileRefID   uint
 	fileContent []byte
 	fileType    string
 	dimension   int
@@ -31,13 +32,13 @@ type RAGIndexer struct {
 // RAGQuery 查询器 - 负责向量检索和问答
 type RAGQuery struct {
 	embedding *embeddingArk.Embedder
-	fileID    uint
+	fileRefID uint
 	topK      int
 }
 
 // NewRAGIndexer 创建 RAG 索引器
 // 用于构建知识库索引（文本解析、文本切块、向量化、存储向量）
-func NewRAGIndexer(ctx context.Context, fileID uint, fileContent []byte, fileType string, embeddingModel string) (*RAGIndexer, error) {
+func NewRAGIndexer(ctx context.Context, fileRefID uint, fileContent []byte, fileType string, embeddingModel string) (*RAGIndexer, error) {
 	// 从环境变量中读取调用向量模型所需的 API Key
 	apiKey := os.Getenv("OPENAI_API_KEY")
 
@@ -65,7 +66,7 @@ func NewRAGIndexer(ctx context.Context, fileID uint, fileContent []byte, fileTyp
 	return &RAGIndexer{
 		embedding:   embedder,
 		splitter:    docSplitter,
-		fileID:      fileID,
+		fileRefID:   fileRefID,
 		fileContent: fileContent,
 		fileType:    fileType,
 		dimension:   dimension,
@@ -120,10 +121,10 @@ func createSplitter(fileType string) document.Transformer {
 func (r *RAGIndexer) IndexFileContent(ctx context.Context) error {
 	// 创建原始文档
 	originalDoc := &schema.Document{
-		ID:      fmt.Sprintf("file_%d", r.fileID),
+		ID:      fmt.Sprintf("file_%d", r.fileRefID),
 		Content: string(r.fileContent),
 		MetaData: map[string]any{
-			"source": fmt.Sprintf("file_%d", r.fileID),
+			"source": fmt.Sprintf("file_%d", r.fileRefID),
 		},
 	}
 
@@ -134,7 +135,7 @@ func (r *RAGIndexer) IndexFileContent(ctx context.Context) error {
 	}
 
 	// 删除该文件的旧索引
-	if err := DeleteIndex(ctx, r.fileID); err != nil {
+	if err := DeleteIndex(ctx, r.fileRefID); err != nil {
 		// 忽略删除错误（可能不存在）
 	}
 
@@ -159,14 +160,15 @@ func (r *RAGIndexer) IndexFileContent(ctx context.Context) error {
 
 		// 准备元数据
 		metadata := map[string]interface{}{
-			"source":    fmt.Sprintf("file_%d_chunk_%d", r.fileID, i),
+			"source":    fmt.Sprintf("file_%d_chunk_%d", r.fileRefID, i),
 			"file_type": r.fileType,
 		}
 		metadataJSON, _ := json.Marshal(metadata)
 
 		// 创建文档块记录
 		chunk := &model.DocumentChunk{
-			FileID:    r.fileID,
+			ChunkID:   uuid.New().String(),
+			FileRefID: r.fileRefID,
 			Content:   doc.Content,
 			Embedding: vector,
 			Metadata:  string(metadataJSON),
@@ -182,7 +184,7 @@ func (r *RAGIndexer) IndexFileContent(ctx context.Context) error {
 }
 
 // NewRAGQuery 创建 RAG 查询器（用于向量检索和问答）
-func NewRAGQuery(ctx context.Context, fileID uint) (*RAGQuery, error) {
+func NewRAGQuery(ctx context.Context, fileRefID uint) (*RAGQuery, error) {
 	cfg := config.GetConfig()
 	apiKey := os.Getenv("OPENAI_API_KEY")
 
@@ -199,7 +201,7 @@ func NewRAGQuery(ctx context.Context, fileID uint) (*RAGQuery, error) {
 
 	return &RAGQuery{
 		embedding: embedder,
-		fileID:    fileID,
+		fileRefID: fileRefID,
 		topK:      5,
 	}, nil
 }
@@ -231,14 +233,14 @@ func (r *RAGQuery) RetrieveDocuments(ctx context.Context, query string) ([]*sche
 	// 使用 pgvector 进行余弦相似度检索
 	var results []model.DocumentChunkWithDistance
 	querySQL := `
-		SELECT id, file_id, content, metadata, created_at, 
+		SELECT id, chunk_id, file_ref_id, content, metadata, created_at,
 			   1 - (embedding <=> ?) as distance
 		FROM document_chunks
-		WHERE file_id = ?
+		WHERE file_ref_id = ?
 		ORDER BY embedding <=> ?
 		LIMIT ?
 	`
-	if err := postgres.DB.Raw(querySQL, vector, r.fileID, vector).Scan(&results).Error; err != nil {
+	if err := postgres.DB.Raw(querySQL, vector, r.fileRefID, vector).Scan(&results).Error; err != nil {
 		return nil, fmt.Errorf("failed to retrieve documents: %w", err)
 	}
 
@@ -249,8 +251,8 @@ func (r *RAGQuery) RetrieveDocuments(ctx context.Context, query string) ([]*sche
 			ID:      fmt.Sprintf("%d", result.ID),
 			Content: result.Content,
 			MetaData: map[string]any{
-				"file_id":  result.FileID,
-				"distance": result.Distance,
+				"file_ref_id": result.FileRefID,
+				"distance":    result.Distance,
 			},
 		}
 		docs = append(docs, doc)
@@ -260,8 +262,8 @@ func (r *RAGQuery) RetrieveDocuments(ctx context.Context, query string) ([]*sche
 }
 
 // RetrieveDocumentsFromMultipleFiles 从多个文件中检索相关文档
-func RetrieveDocumentsFromMultipleFiles(ctx context.Context, fileIDs []uint, query string, topK int) ([]*schema.Document, error) {
-	if len(fileIDs) == 0 {
+func RetrieveDocumentsFromMultipleFiles(ctx context.Context, fileRefIDs []uint, query string, topK int) ([]*schema.Document, error) {
+	if len(fileRefIDs) == 0 {
 		return nil, nil
 	}
 
@@ -299,14 +301,14 @@ func RetrieveDocumentsFromMultipleFiles(ctx context.Context, fileIDs []uint, que
 	// 使用 pgvector 进行余弦相似度检索
 	var results []model.DocumentChunkWithDistance
 	querySQL := `
-		SELECT id, file_id, content, metadata, created_at, 
+		SELECT id, chunk_id, file_ref_id, content, metadata, created_at,
 			   1 - (embedding <=> ?) as distance
 		FROM document_chunks
-		WHERE file_id IN ?
+		WHERE file_ref_id IN ?
 		ORDER BY embedding <=> ?
 		LIMIT ?
 	`
-	if err := postgres.DB.Raw(querySQL, vector, fileIDs, vector).Scan(&results).Error; err != nil {
+	if err := postgres.DB.Raw(querySQL, vector, fileRefIDs, vector).Scan(&results).Error; err != nil {
 		return nil, fmt.Errorf("failed to retrieve documents: %w", err)
 	}
 
@@ -317,8 +319,8 @@ func RetrieveDocumentsFromMultipleFiles(ctx context.Context, fileIDs []uint, que
 			ID:      fmt.Sprintf("%d", result.ID),
 			Content: result.Content,
 			MetaData: map[string]any{
-				"file_id":  result.FileID,
-				"distance": result.Distance,
+				"file_ref_id": result.FileRefID,
+				"distance":    result.Distance,
 			},
 		}
 		docs = append(docs, doc)
@@ -351,13 +353,13 @@ func BuildRAGPrompt(query string, docs []*schema.Document) string {
 }
 
 // DeleteIndex 删除指定文件的所有向量索引
-func DeleteIndex(ctx context.Context, fileID uint) error {
-	return postgres.DB.Where("file_id = ?", fileID).Delete(&model.DocumentChunk{}).Error
+func DeleteIndex(ctx context.Context, fileRefID uint) error {
+	return postgres.DB.Where("file_ref_id = ?", fileRefID).Delete(&model.DocumentChunk{}).Error
 }
 
 // GetChunkCount 获取指定文件的文档块数量
-func GetChunkCount(fileID uint) (int64, error) {
+func GetChunkCount(fileRefID uint) (int64, error) {
 	var count int64
-	err := postgres.DB.Model(&model.DocumentChunk{}).Where("file_id = ?", fileID).Count(&count).Error
+	err := postgres.DB.Model(&model.DocumentChunk{}).Where("file_ref_id = ?", fileRefID).Count(&count).Error
 	return count, err
 }
