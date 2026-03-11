@@ -227,6 +227,12 @@ pnpm lint
 2. Service：业务逻辑与缓存策略决策
 3. DAO：数据访问，包含 PostgreSQL 与 Redis 的领域化读写
 
+### 前端组件兼容性
+
+- 项目使用 Ant Design 6，新增或修改前端组件时优先使用新属性名
+- 例如 `Card` 使用 `variant` 代替 `bordered`，`Space` 使用 `orientation` 代替 `direction`
+- 提交前应消除本项目源码中可直接修复的 Ant Design 弃用警告
+
 ### 响应结构
 
 ```go

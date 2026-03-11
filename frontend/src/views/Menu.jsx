@@ -59,7 +59,7 @@ const Menu = () => {
             <Card
               key={item.key}
               className="menu-item"
-              bordered={false}
+              variant="borderless"
               onClick={() => navigate(item.path)}
               style={{ animationDelay: `${index * 0.1}s` }}
             >

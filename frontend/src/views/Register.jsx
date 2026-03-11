@@ -69,7 +69,7 @@ const Register = () => {
 
   return (
     <div className="register-container">
-      <Card className="register-card" bordered={false}>
+      <Card className="register-card" variant="borderless">
         <div className="card-header">
           <h2>注册</h2>
         </div>

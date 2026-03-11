@@ -81,7 +81,7 @@ const FileTable = ({
       dataIndex: 'index_status',
       key: 'index_status',
       render: (status, record) => (
-        <Space direction="vertical" size={4}>
+        <Space orientation="vertical" size={4}>
           {renderIndexStatus(status)}
           {record.index_message ? (
             <Tooltip title={record.index_message}>

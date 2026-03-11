@@ -35,7 +35,7 @@ const Login = () => {
 
   return (
     <div className="login-container">
-      <Card className="login-card" bordered={false}>
+      <Card className="login-card" variant="borderless">
         <div className="card-header">
           <h2>登录</h2>
         </div>
