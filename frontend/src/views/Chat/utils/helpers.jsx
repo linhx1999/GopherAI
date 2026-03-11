@@ -101,17 +101,22 @@ const mergeToolCalls = (baseCalls = [], nextCalls = []) => {
   return merged
 }
 
-export const mergeSchemaMessageChunk = (baseMessage = {}, chunk = {}) => ({
-  ...baseMessage,
-  ...chunk,
-  content: `${baseMessage.content || ''}${chunk.content || ''}`,
-  reasoning_content: `${baseMessage.reasoning_content || ''}${chunk.reasoning_content || ''}`,
-  multi_content: chunk.multi_content?.length ? [...(baseMessage.multi_content || []), ...chunk.multi_content] : (baseMessage.multi_content || []),
-  user_input_multi_content: chunk.user_input_multi_content?.length ? [...(baseMessage.user_input_multi_content || []), ...chunk.user_input_multi_content] : (baseMessage.user_input_multi_content || []),
-  assistant_output_multi_content: chunk.assistant_output_multi_content?.length ? [...(baseMessage.assistant_output_multi_content || []), ...chunk.assistant_output_multi_content] : (baseMessage.assistant_output_multi_content || []),
-  tool_calls: mergeToolCalls(baseMessage.tool_calls || [], chunk.tool_calls || []),
-  response_meta: chunk.response_meta || baseMessage.response_meta,
-})
+export const mergeSchemaMessageChunk = (baseMessage = {}, chunk = {}) => {
+  const safeBaseMessage = baseMessage || {}
+  const safeChunk = chunk || {}
+
+  return {
+    ...safeBaseMessage,
+    ...safeChunk,
+    content: `${safeBaseMessage.content || ''}${safeChunk.content || ''}`,
+    reasoning_content: `${safeBaseMessage.reasoning_content || ''}${safeChunk.reasoning_content || ''}`,
+    multi_content: safeChunk.multi_content?.length ? [...(safeBaseMessage.multi_content || []), ...safeChunk.multi_content] : (safeBaseMessage.multi_content || []),
+    user_input_multi_content: safeChunk.user_input_multi_content?.length ? [...(safeBaseMessage.user_input_multi_content || []), ...safeChunk.user_input_multi_content] : (safeBaseMessage.user_input_multi_content || []),
+    assistant_output_multi_content: safeChunk.assistant_output_multi_content?.length ? [...(safeBaseMessage.assistant_output_multi_content || []), ...safeChunk.assistant_output_multi_content] : (safeBaseMessage.assistant_output_multi_content || []),
+    tool_calls: mergeToolCalls(safeBaseMessage.tool_calls || [], safeChunk.tool_calls || []),
+    response_meta: safeChunk.response_meta || safeBaseMessage.response_meta,
+  }
+}
 
 export const isSchemaMessagePayload = (data) => Boolean(data?.role)
 
@@ -157,6 +162,14 @@ const isToolTraceMessage = (message = {}) => {
   return !hasVisibleAnswer && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
 }
 
+const getThoughtChainDescription = (descriptionMessage = null) => {
+  if (!descriptionMessage) {
+    return ''
+  }
+
+  return getMessageDisplayContent(descriptionMessage)
+}
+
 export const hasToolActivity = (toolTraceRecords = []) => toolTraceRecords.some((record) => {
   const message = record.message || {}
   return message.role === 'tool' || (Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
@@ -174,61 +187,32 @@ export const shouldRenderToolTrace = (record, toolTraceRecords = []) => {
   return hasToolActivity(toolTraceRecords)
 }
 
-const buildPlanningItem = ({ record, hasExecution, toolDisplayNames }) => {
-  const planningMessage = record?.planningMessage || null
-  const planningContent = getMessageDisplayContent(planningMessage)
-  const hasPlanningContent = Boolean(planningContent)
-
-  if (!record?.assistantRenderMode && !hasExecution && !hasPlanningContent) {
-    return null
-  }
-
-  const enabledToolAPINames = normalizeEnabledToolAPINames(record?.enabledToolAPINames)
-  const isPending = Boolean(record?.pending) && !hasExecution
-  const description = hasPlanningContent
-    ? '已生成规划说明'
-    : enabledToolAPINames.length > 0
-      ? `已启用：${enabledToolAPINames.map((toolName) => getToolDisplayName(toolName, toolDisplayNames)).join('、')}`
-      : (hasExecution ? '已进入工具执行链路' : '工具规划中')
-
-  return {
-    key: `${record?.key || 'tool-trace'}-plan`,
-    title: '工具规划',
-    description,
-    content: hasPlanningContent ? (
-      <div className="thought-chain-markdown">
-        {renderMarkdown(planningContent)}
-      </div>
-    ) : null,
-    collapsible: hasPlanningContent,
-    status: isPending ? 'loading' : 'success',
-    blink: isPending
-  }
-}
-
-const buildToolCallItems = (toolTraceRecords = [], toolDisplayNames) => toolTraceRecords.flatMap((record) => {
-  const message = record.message || {}
+const buildToolCallItems = ({ record, toolTraceRecords = [] }) => toolTraceRecords.flatMap((traceRecord, traceIndex) => {
+  const message = traceRecord.message || {}
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
 
   return toolCalls.map((call, index) => {
     const toolName = call.function?.name || call.id || `tool-${index + 1}`
     const formattedArguments = formatToolArguments(call.function?.arguments)
+    const traceDescription = getThoughtChainDescription(
+      traceRecord.traceDescription || (traceIndex === 0 ? record?.planningMessage : null)
+    )
 
     return {
-      key: `${record.key}-call-${call.id || call.index || index}`,
-      title: `调用 ${getToolDisplayName(toolName, toolDisplayNames)}`,
-      description: formattedArguments ? '参数已准备' : '等待工具执行',
+      key: `${traceRecord.key}-call-${call.id || call.index || index}`,
+      title: toolName,
+      description: traceDescription || (formattedArguments ? '参数已准备' : '等待工具执行'),
       content: formattedArguments ? (
         <pre className="thought-chain-code-block">{formattedArguments}</pre>
       ) : null,
       collapsible: Boolean(formattedArguments),
-      status: record.pending ? 'loading' : 'success',
-      blink: Boolean(record.pending)
+      status: traceRecord.pending ? 'loading' : 'success',
+      blink: Boolean(traceRecord.pending)
     }
   })
 })
 
-const buildToolResultItems = (toolTraceRecords = [], toolDisplayNames) => toolTraceRecords.flatMap((record, index) => {
+const buildToolResultItems = (toolTraceRecords = []) => toolTraceRecords.flatMap((record, index) => {
   const message = record.message || {}
   if (message.role !== 'tool') {
     return []
@@ -239,7 +223,7 @@ const buildToolResultItems = (toolTraceRecords = [], toolDisplayNames) => toolTr
 
   return [{
     key: `${record.key}-result`,
-    title: `${getToolDisplayName(toolName, toolDisplayNames)} 执行结果`,
+    title: `${toolName} 执行结果`,
     description: content ? '工具返回了可展示内容' : '工具已完成执行',
     content: content ? (
       <div className="thought-chain-markdown">
@@ -252,36 +236,13 @@ const buildToolResultItems = (toolTraceRecords = [], toolDisplayNames) => toolTr
   }]
 })
 
-const buildAnswerItem = ({ record, hasExecution }) => {
-  if (!record) {
-    return null
-  }
-
-  const message = record.message || {}
-  const hasAnswer = Boolean((message.content || '').trim())
-  const isPending = Boolean(record.pending) && !hasAnswer
-
-  return {
-    key: `${record.key}-answer`,
-    title: hasExecution ? '整理最终回答' : '直接生成回答',
-    description: hasAnswer ? '已生成最终回答' : (isPending ? '正在生成最终回答' : '当前轮次未返回正文'),
-    status: isPending ? 'loading' : 'success',
-    blink: isPending
-  }
-}
-
-export const buildToolTraceItems = ({ record = null, toolTraceRecords = [], toolDisplayNames = DEFAULT_TOOL_DISPLAY_NAMES }) => {
-  const hasExecution = hasToolActivity(toolTraceRecords)
-  const planningItem = buildPlanningItem({ record, hasExecution, toolDisplayNames })
-  const toolCallItems = buildToolCallItems(toolTraceRecords, toolDisplayNames)
-  const toolResultItems = buildToolResultItems(toolTraceRecords, toolDisplayNames)
-  const answerItem = buildAnswerItem({ record, hasExecution })
+export const buildToolTraceItems = ({ record = null, toolTraceRecords = [] }) => {
+  const toolCallItems = buildToolCallItems({ record, toolTraceRecords })
+  const toolResultItems = buildToolResultItems(toolTraceRecords)
 
   return [
-    planningItem,
     ...toolCallItems,
-    ...toolResultItems,
-    answerItem
+    ...toolResultItems
   ].filter(Boolean)
 }
 

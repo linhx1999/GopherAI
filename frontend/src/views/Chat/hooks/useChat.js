@@ -67,7 +67,8 @@ const createRecord = ({
   assistantRenderMode = ASSISTANT_DISPLAY_MODES.DEFAULT,
   enabledToolAPINames = [],
   planningMessage = null,
-  toolTraceRecords = []
+  toolTraceRecords = [],
+  traceDescription = null
 }) => ({
   key,
   index,
@@ -79,7 +80,8 @@ const createRecord = ({
   assistantRenderMode,
   enabledToolAPINames,
   planningMessage,
-  toolTraceRecords
+  toolTraceRecords,
+  traceDescription
 })
 
 const hasMessageIndex = (records = [], messageIndex) => (
@@ -90,16 +92,18 @@ const hasVisibleAssistantContent = (message = {}) => Boolean(
   String(message?.content || '').trim() || String(message?.reasoning_content || '').trim()
 )
 
-const createToolTraceRecord = ({
-  index,
-  chunk,
-  pending = chunk?.role === MESSAGE_ROLES.TOOL ? false : !isMessageFinished(chunk)
-}) => createRecord({
-  index,
-  message: mergeSchemaMessageChunk({}, chunk),
-  pending,
-  renderMode: MESSAGE_RENDER_MODE.STREAM
-})
+    const createToolTraceRecord = ({
+      index,
+      chunk,
+      traceDescription = null,
+      pending = chunk?.role === MESSAGE_ROLES.TOOL ? false : !isMessageFinished(chunk)
+    }) => createRecord({
+      index,
+      message: mergeSchemaMessageChunk({}, chunk),
+      pending,
+      renderMode: MESSAGE_RENDER_MODE.STREAM,
+      traceDescription
+    })
 
 const settleRecord = (record) => ({
   ...record,
@@ -366,6 +370,7 @@ const useChat = () => {
     let activeMessageKey = null
     let activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
     let activeToolTraceKey = null
+    let pendingToolCallChunk = null
     const createdRecordKeys = []
 
     const finalizeStream = () => {
@@ -377,6 +382,7 @@ const useChat = () => {
       activeMessageKey = null
       activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
       activeToolTraceKey = null
+      pendingToolCallChunk = null
       setIsLoading(false)
     }
 
@@ -396,6 +402,7 @@ const useChat = () => {
       activeMessageKey = isMessageFinished(record.message) ? null : record.key
       activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
       activeToolTraceKey = null
+      pendingToolCallChunk = null
       createdRecordKeys.push(record.key)
       setMessages((prev) => [...prev, record])
     }
@@ -410,6 +417,8 @@ const useChat = () => {
         if (!pending) {
           activeMessageKey = null
           activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
+          activeToolTraceKey = null
+          pendingToolCallChunk = null
         }
         return {
           ...item,
@@ -419,7 +428,7 @@ const useChat = () => {
       }))
     }
 
-    const appendToolTraceToActiveRecord = (chunk, { mergeIntoLast = false } = {}) => {
+    const appendToolTraceToActiveRecord = (chunk, { mergeIntoLast = false, traceDescription = null } = {}) => {
       setMessages((prev) => prev.map((item) => {
         if (item.key !== activeMessageKey) {
           return item
@@ -443,7 +452,8 @@ const useChat = () => {
 
         const traceRecord = createToolTraceRecord({
           index: null,
-          chunk
+          chunk,
+          traceDescription
         })
         activeToolTraceKey = traceRecord.key
         return {
@@ -453,36 +463,25 @@ const useChat = () => {
       }))
     }
 
-    const promoteAssistantRecordToToolChain = (chunk) => {
+    const commitPendingToolCallToThoughtChain = () => {
+      if (!pendingToolCallChunk) {
+        return
+      }
+
       setMessages((prev) => prev.map((item) => {
         if (item.key !== activeMessageKey) {
           return item
         }
 
-        const nextPlanningMessage = hasVisibleAssistantContent(item.message)
+        const traceDescription = hasVisibleAssistantContent(item.message)
           ? mergeSchemaMessageChunk({}, item.message)
-          : item.planningMessage
-
-        const planningChunk = hasVisibleAssistantContent(chunk)
-          ? {
-            role: MESSAGE_ROLES.ASSISTANT,
-            content: chunk.content || '',
-            reasoning_content: chunk.reasoning_content || ''
-          }
           : null
 
-        const planningMessage = planningChunk
-          ? mergeSchemaMessageChunk(nextPlanningMessage || { role: MESSAGE_ROLES.ASSISTANT }, planningChunk)
-          : nextPlanningMessage
-
-        const traceChunk = {
-          ...chunk,
-          content: '',
-          reasoning_content: ''
-        }
         const traceRecord = createToolTraceRecord({
           index: null,
-          chunk: traceChunk
+          chunk: pendingToolCallChunk,
+          traceDescription,
+          pending: true
         })
 
         activeRecordMode = ASSISTANT_DISPLAY_MODES.TOOL_CHAIN
@@ -491,31 +490,23 @@ const useChat = () => {
         return {
           ...item,
           message: { role: MESSAGE_ROLES.ASSISTANT, content: '', reasoning_content: '' },
-          planningMessage,
           toolTraceRecords: [...(item.toolTraceRecords || []), traceRecord],
           assistantRenderMode: ASSISTANT_DISPLAY_MODES.TOOL_CHAIN,
           enabledToolAPINames: runOptions.enabledToolAPINames,
           pending: true
         }
       }))
+
+      pendingToolCallChunk = null
     }
 
-    const createToolChainRecord = (chunk) => {
-      const planningMessage = hasVisibleAssistantContent(chunk)
-        ? {
-          role: MESSAGE_ROLES.ASSISTANT,
-          content: chunk.content || '',
-          reasoning_content: chunk.reasoning_content || ''
-        }
-        : null
-
-      const traceChunk = chunk.role === MESSAGE_ROLES.ASSISTANT
-        ? { ...chunk, content: '', reasoning_content: '' }
-        : chunk
-
+    const createToolChainRecord = (chunk, traceDescription = null) => {
+      const safeChunk = chunk || { role: MESSAGE_ROLES.ASSISTANT, tool_calls: [] }
       const traceRecord = createToolTraceRecord({
         index: null,
-        chunk: traceChunk
+        chunk: safeChunk,
+        traceDescription,
+        pending: safeChunk.role === MESSAGE_ROLES.ASSISTANT
       })
 
       const record = createRecord({
@@ -526,7 +517,6 @@ const useChat = () => {
         expectReasoning: runOptions.thinkingModeEnabled,
         assistantRenderMode: ASSISTANT_DISPLAY_MODES.TOOL_CHAIN,
         enabledToolAPINames: runOptions.enabledToolAPINames,
-        planningMessage,
         toolTraceRecords: [traceRecord]
       })
 
@@ -537,6 +527,7 @@ const useChat = () => {
       activeMessageKey = record.key
       activeRecordMode = ASSISTANT_DISPLAY_MODES.TOOL_CHAIN
       activeToolTraceKey = traceRecord.key
+      pendingToolCallChunk = null
       createdRecordKeys.push(record.key)
       setMessages((prev) => [...prev, record])
     }
@@ -553,6 +544,7 @@ const useChat = () => {
           activeMessageKey = null
           activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
           activeToolTraceKey = null
+          pendingToolCallChunk = null
         }
 
         return {
@@ -568,6 +560,17 @@ const useChat = () => {
         return
       }
       appendToolTraceToActiveRecord(chunk, { mergeIntoLast: true })
+    }
+
+    const updatePendingToolCallChunk = (chunk) => {
+      pendingToolCallChunk = mergeSchemaMessageChunk(
+        pendingToolCallChunk || { role: MESSAGE_ROLES.ASSISTANT, content: '', reasoning_content: '' },
+        {
+          ...chunk,
+          content: '',
+          reasoning_content: ''
+        }
+      )
     }
 
     try {
@@ -632,37 +635,40 @@ const useChat = () => {
 
           const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0
           const hasVisibleContent = hasVisibleAssistantContent(payload)
+          const finishReason = payload.response_meta?.finish_reason
 
           if (payload.role === MESSAGE_ROLES.ASSISTANT) {
             if (hasToolCalls) {
-              if (!activeMessageKey) {
-                createToolChainRecord(payload)
-              } else if (activeRecordMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
-                appendToolTraceToActiveRecord({
-                  ...payload,
-                  content: '',
-                  reasoning_content: ''
-                })
-              } else {
-                promoteAssistantRecordToToolChain(payload)
-              }
+              updatePendingToolCallChunk(payload)
               continue
             }
 
             if (activeRecordMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
-              if (hasVisibleContent) {
+              if (finishReason === 'tool_calls') {
+                if (pendingToolCallChunk) {
+                  commitPendingToolCallToThoughtChain()
+                } else {
+                  updateCurrentToolCallStatus(payload)
+                }
+                continue
+              }
+
+              if (hasVisibleContent || finishReason === 'stop') {
                 updateFinalAssistantInToolChain(payload)
                 continue
               }
 
               if (isMessageFinished(payload)) {
-                if (hasVisibleAssistantContent(payload)) {
-                  updateFinalAssistantInToolChain(payload)
-                } else if (payload.response_meta?.finish_reason === 'tool_calls') {
-                  updateCurrentToolCallStatus(payload)
-                } else {
-                  updateFinalAssistantInToolChain(payload)
-                }
+                updateFinalAssistantInToolChain(payload)
+              }
+              continue
+            }
+
+            if (finishReason === 'tool_calls') {
+              if (!activeMessageKey) {
+                createToolChainRecord(pendingToolCallChunk || { role: MESSAGE_ROLES.ASSISTANT, tool_calls: [] })
+              } else {
+                commitPendingToolCallToThoughtChain()
               }
               continue
             }
@@ -680,6 +686,29 @@ const useChat = () => {
             if (!activeMessageKey) {
               createToolChainRecord(payload)
             } else {
+              if (activeToolTraceKey) {
+                setMessages((prev) => prev.map((item) => {
+                  if (item.key !== activeMessageKey) {
+                    return item
+                  }
+
+                  const toolTraceRecords = Array.isArray(item.toolTraceRecords) ? [...item.toolTraceRecords] : []
+                  const traceIndex = toolTraceRecords.findIndex((record) => record.key === activeToolTraceKey)
+                  if (traceIndex === -1) {
+                    return item
+                  }
+
+                  toolTraceRecords[traceIndex] = {
+                    ...toolTraceRecords[traceIndex],
+                    pending: false
+                  }
+
+                  return {
+                    ...item,
+                    toolTraceRecords
+                  }
+                }))
+              }
               appendToolTraceToActiveRecord(payload)
             }
           }
