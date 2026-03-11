@@ -17,8 +17,8 @@ import (
 
 // ToolInfo 工具信息（用于 API 返回）
 type ToolInfo struct {
-	Name        string                 `json:"name"`
-	DisplayName string                 `json:"display_name"`
+	Name        string                 `json:"name"`         // API 调用名
+	DisplayName string                 `json:"display_name"` // 前端展示名
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	Category    string                 `json:"category"` // "builtin" | "mcp" | "rag"
@@ -43,6 +43,11 @@ var (
 	registryOnce sync.Once
 )
 
+const (
+	sequentialThinkingToolName      = "sequentialthinking"
+	legacySequentialThinkingToolKey = "sequential_thinking"
+)
+
 // GetToolRegistry 获取全局工具注册表
 func GetToolRegistry() *ToolRegistry {
 	registryOnce.Do(func() {
@@ -63,7 +68,7 @@ func (r *ToolRegistry) initBuiltinTools() {
 	if err != nil {
 		log.Printf("Failed to create sequential_thinking tool: %v", err)
 	} else {
-		r.builtin["sequential_thinking"] = tool
+		r.builtin[sequentialThinkingToolName] = tool
 	}
 }
 
@@ -179,7 +184,7 @@ func NormalizeToolNames(names []string) []string {
 	seen := make(map[string]struct{}, len(names))
 
 	for _, name := range names {
-		trimmedName := strings.TrimSpace(name)
+		trimmedName := normalizeToolName(name)
 		if trimmedName == "" {
 			continue
 		}
@@ -192,6 +197,16 @@ func NormalizeToolNames(names []string) []string {
 
 	sort.Strings(normalized)
 	return normalized
+}
+
+func normalizeToolName(name string) string {
+	trimmedName := strings.TrimSpace(name)
+	switch trimmedName {
+	case legacySequentialThinkingToolKey:
+		return sequentialThinkingToolName
+	default:
+		return trimmedName
+	}
 }
 
 func (r *ToolRegistry) resolveMCPTool(ctx context.Context, toolName string) (tool.BaseTool, bool) {
@@ -222,7 +237,7 @@ func (r *ToolRegistry) resolveMCPTool(ctx context.Context, toolName string) (too
 	return nil, false
 }
 
-// ResolveTools 根据名称列表解析工具实例。
+// ResolveTools 根据 API 调用名列表解析工具实例。
 func (r *ToolRegistry) ResolveTools(ctx context.Context, names []string, ragFileIDs []uint) ([]tool.BaseTool, error) {
 	normalizedNames := NormalizeToolNames(names)
 	resolvedTools := make([]tool.BaseTool, 0, len(normalizedNames))
@@ -233,8 +248,8 @@ func (r *ToolRegistry) ResolveTools(ctx context.Context, names []string, ragFile
 			if len(ragFileIDs) > 0 {
 				resolvedTools = append(resolvedTools, NewRAGTool(ragFileIDs))
 			}
-		case "sequential_thinking":
-			if builtinTool := r.GetBuiltinTool("sequential_thinking"); builtinTool != nil {
+		case sequentialThinkingToolName:
+			if builtinTool := r.GetBuiltinTool(sequentialThinkingToolName); builtinTool != nil {
 				resolvedTools = append(resolvedTools, builtinTool)
 			}
 		default:
@@ -324,13 +339,11 @@ func (r *ToolRegistry) ListAvailableTools(ctx context.Context) []ToolInfo {
 }
 
 func toolDisplayName(toolName string) string {
-	switch toolName {
+	switch normalizeToolName(toolName) {
 	case "knowledge_search":
 		return "知识库检索"
-	case "sequential_thinking":
+	case sequentialThinkingToolName:
 		return "逐步思考"
-	case "get_weather":
-		return "天气查询"
 	default:
 		return toolName
 	}
@@ -352,6 +365,7 @@ func extractParams(info *schema.ToolInfo) map[string]interface{} {
 
 // HasTool 检查工具是否存在
 func (r *ToolRegistry) HasTool(name string) bool {
+	name = normalizeToolName(name)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

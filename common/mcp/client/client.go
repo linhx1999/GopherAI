@@ -88,27 +88,6 @@ func (m *MCPClient) CallTool(ctx context.Context, toolName string, args map[stri
 	return result, nil
 }
 
-// CallWeatherTool 调用get_weather工具
-func (m *MCPClient) CallWeatherTool(ctx context.Context, city string) (*mcp.CallToolResult, error) {
-	fmt.Printf("正在查询城市 %s 的天气...\n", city)
-
-	callToolRequest := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name: "get_weather",
-			Arguments: map[string]any{
-				"city": city,
-			},
-		},
-	}
-
-	result, err := m.c.CallTool(ctx, callToolRequest)
-	if err != nil {
-		return nil, fmt.Errorf("调用工具失败: %w", err)
-	}
-
-	return result, nil
-}
-
 // GetToolResultText 获取工具结果中的文本内容
 func (m *MCPClient) GetToolResultText(result *mcp.CallToolResult) string {
 	var text string

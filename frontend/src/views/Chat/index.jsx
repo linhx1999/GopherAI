@@ -24,7 +24,7 @@ const Chat = () => {
   const {
     // 基础状态
     availableTools,
-    enabledToolNames,
+    enabledToolAPINames,
     thinkingMode,
     isStreaming,
     currentPage,
@@ -47,7 +47,7 @@ const Chat = () => {
     handleSend,
     handleActionClick,
     // 状态更新
-    setEnabledToolNames,
+    setEnabledToolAPINames,
     setThinkingMode,
     setIsStreaming,
     setCurrentPage,
@@ -92,14 +92,14 @@ const Chat = () => {
           inputValue={inputValue}
           isLoading={isLoading}
           availableTools={availableTools}
-          enabledToolNames={enabledToolNames}
+          enabledToolApiNames={enabledToolAPINames}
           thinkingMode={thinkingMode}
           isStreaming={isStreaming}
           attachments={attachments}
           attachmentsOpen={attachmentsOpen}
           onInputChange={setInputValue}
           onSubmit={handleSend}
-          onEnabledToolNamesChange={setEnabledToolNames}
+          onEnabledToolApiNamesChange={setEnabledToolAPINames}
           onThinkingModeChange={setThinkingMode}
           onStreamingChange={setIsStreaming}
           onAttachmentsChange={setAttachments}

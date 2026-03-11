@@ -16,7 +16,7 @@ import {
   isMessageFinished,
   isSchemaMessagePayload,
   mergeSchemaMessageChunk,
-  normalizeEnabledToolNames,
+  normalizeEnabledToolAPINames,
   parseSSELine
 } from '../utils/helpers.jsx'
 
@@ -65,7 +65,7 @@ const createRecord = ({
   renderMode = MESSAGE_RENDER_MODE.INSTANT,
   expectReasoning = false,
   assistantRenderMode = ASSISTANT_DISPLAY_MODES.DEFAULT,
-  enabledToolNames = []
+  enabledToolAPINames = []
 }) => ({
   key,
   index,
@@ -75,7 +75,7 @@ const createRecord = ({
   renderMode,
   expectReasoning,
   assistantRenderMode,
-  enabledToolNames
+  enabledToolAPINames
 })
 
 const hasMessageIndex = (records = [], messageIndex) => (
@@ -90,7 +90,7 @@ const useChat = () => {
   const isTempSessionRef = useRef(false)
   const { availableTools } = useToolCatalog()
 
-  const [enabledToolNames, setEnabledToolNames] = useState([])
+  const [enabledToolAPINames, setEnabledToolAPINames] = useState([])
   const [thinkingMode, setThinkingMode] = useState(false)
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
@@ -136,8 +136,8 @@ const useChat = () => {
       return
     }
 
-    const availableToolNames = new Set(availableTools.map((tool) => tool.name))
-    setEnabledToolNames((previousToolNames) => previousToolNames.filter((toolName) => availableToolNames.has(toolName)))
+    const availableToolAPINames = new Set(availableTools.map((tool) => tool.apiName))
+    setEnabledToolAPINames((previousToolAPINames) => previousToolAPINames.filter((toolName) => availableToolAPINames.has(toolName)))
   }, [availableTools])
 
   const loadMessages = useCallback(async (sessionId) => {
@@ -314,14 +314,14 @@ const useChat = () => {
   }, [loadSessions])
 
   const buildChatRunOptions = useCallback(() => ({
-    enabledToolNames: normalizeEnabledToolNames(enabledToolNames),
+    enabledToolAPINames: normalizeEnabledToolAPINames(enabledToolAPINames),
     thinkingModeEnabled: thinkingMode
-  }), [enabledToolNames, thinkingMode])
+  }), [enabledToolAPINames, thinkingMode])
 
   const buildChatRequest = useCallback((question, runOptions) => {
     const payload = {
       message: question,
-      tools: runOptions.enabledToolNames,
+      tools: runOptions.enabledToolAPINames,
       thinking_mode: runOptions.thinkingModeEnabled,
     }
 
@@ -334,7 +334,7 @@ const useChat = () => {
   const sendStreamMessage = useCallback(async (question, runOptions) => {
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
     const payload = buildChatRequest(question, runOptions)
-    const hasEnabledTools = runOptions.enabledToolNames.length > 0
+    const hasEnabledTools = runOptions.enabledToolAPINames.length > 0
 
     let nextMessageIndex = null
     let activeMessageKey = null
@@ -358,7 +358,7 @@ const useChat = () => {
         renderMode: MESSAGE_RENDER_MODE.STREAM,
         expectReasoning: runOptions.thinkingModeEnabled && chunk.role === MESSAGE_ROLES.ASSISTANT,
         assistantRenderMode: hasEnabledTools ? ASSISTANT_DISPLAY_MODES.TOOL_CHAIN : ASSISTANT_DISPLAY_MODES.DEFAULT,
-        enabledToolNames: runOptions.enabledToolNames
+        enabledToolAPINames: runOptions.enabledToolAPINames
       })
       if (nextMessageIndex !== null) {
         nextMessageIndex += 1
@@ -465,7 +465,7 @@ const useChat = () => {
 
   const sendGenerateMessage = useCallback(async (question, runOptions) => {
     const payload = buildChatRequest(question, runOptions)
-    const hasEnabledTools = runOptions.enabledToolNames.length > 0
+    const hasEnabledTools = runOptions.enabledToolAPINames.length > 0
     try {
       const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
 
@@ -499,7 +499,7 @@ const useChat = () => {
               renderMode: MESSAGE_RENDER_MODE.INSTANT,
               expectReasoning: runOptions.thinkingModeEnabled && data.message.role === MESSAGE_ROLES.ASSISTANT,
               assistantRenderMode: ASSISTANT_DISPLAY_MODES.DEFAULT,
-              enabledToolNames: runOptions.enabledToolNames
+              enabledToolAPINames: runOptions.enabledToolAPINames
             })]
           })
         }
@@ -648,7 +648,7 @@ const useChat = () => {
   return {
     bubbleListRef,
     availableTools,
-    enabledToolNames,
+    enabledToolAPINames,
     thinkingMode,
     isStreaming,
     currentPage,
@@ -669,7 +669,7 @@ const useChat = () => {
     setEditTitle,
     handleSend,
     handleActionClick,
-    setEnabledToolNames,
+    setEnabledToolAPINames,
     setThinkingMode,
     setIsStreaming,
     setCurrentPage,

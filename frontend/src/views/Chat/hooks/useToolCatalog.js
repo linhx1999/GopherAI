@@ -10,13 +10,13 @@ const parseToolCatalogResponse = (responseData) => {
 
   return toolList
     .map((tool) => ({
-      name: String(tool?.name || '').trim(),
-      displayName: String(tool?.display_name || tool?.displayName || tool?.name || '').trim(),
+      apiName: String(tool?.name || tool?.api_name || '').trim(),
+      displayName: String(tool?.display_name || tool?.displayName || tool?.name || tool?.api_name || '').trim(),
       description: String(tool?.description || '').trim(),
       category: String(tool?.category || '').trim(),
       parameters: tool?.parameters || {}
     }))
-    .filter((tool) => tool.name)
+    .filter((tool) => tool.apiName)
 }
 
 const useToolCatalog = () => {

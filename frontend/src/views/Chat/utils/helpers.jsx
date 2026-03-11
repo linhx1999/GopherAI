@@ -31,7 +31,7 @@ export const renderMarkdown = (content) => <XMarkdown content={content} />
 const DEFAULT_TOOL_DISPLAY_NAMES = {
   knowledge_search: '知识库检索',
   sequential_thinking: '逐步思考',
-  get_weather: '天气查询'
+  sequentialthinking: '逐步思考'
 }
 
 // Role 配置
@@ -103,9 +103,9 @@ export const isSchemaMessagePayload = (data) => Boolean(data?.role)
 
 export const isMessageFinished = (message) => Boolean(message?.response_meta?.finish_reason)
 
-export const normalizeEnabledToolNames = (toolNames) => (
-  Array.isArray(toolNames)
-    ? [...new Set(toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean))].sort()
+export const normalizeEnabledToolAPINames = (toolAPINames) => (
+  Array.isArray(toolAPINames)
+    ? [...new Set(toolAPINames.map((toolName) => String(toolName || '').trim()).filter(Boolean))].sort()
     : []
 )
 
@@ -122,11 +122,11 @@ export const createToolDisplayNameMap = (toolCatalog = []) => {
   const labels = { ...DEFAULT_TOOL_DISPLAY_NAMES }
 
   toolCatalog.forEach((tool) => {
-    const name = String(tool?.name || '').trim()
-    if (!name) {
+    const apiName = String(tool?.apiName || tool?.name || '').trim()
+    if (!apiName) {
       return
     }
-    labels[name] = tool.displayName || tool.display_name || labels[name] || name
+    labels[apiName] = tool.displayName || tool.display_name || labels[apiName] || apiName
   })
 
   return labels
@@ -165,10 +165,10 @@ const buildPlanningItem = ({ record, hasExecution, toolDisplayNames }) => {
     return null
   }
 
-  const enabledToolNames = normalizeEnabledToolNames(record?.enabledToolNames)
+  const enabledToolAPINames = normalizeEnabledToolAPINames(record?.enabledToolAPINames)
   const isPending = Boolean(record?.pending) && !hasExecution
-  const description = enabledToolNames.length > 0
-    ? `已启用：${enabledToolNames.map((toolName) => getToolDisplayName(toolName, toolDisplayNames)).join('、')}`
+  const description = enabledToolAPINames.length > 0
+    ? `已启用：${enabledToolAPINames.map((toolName) => getToolDisplayName(toolName, toolDisplayNames)).join('、')}`
     : (hasExecution ? '已进入工具执行链路' : '工具规划中')
 
   return {

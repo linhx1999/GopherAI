@@ -14,10 +14,10 @@ import { Sender, Attachments } from '@ant-design/x'
 const Switch = Sender.Switch
 
 const resolveToolIcon = (tool) => {
-  if (tool?.name === 'knowledge_search') {
+  if (tool?.category === 'rag' || tool?.apiName === 'knowledge_search') {
     return SearchOutlined
   }
-  if (tool?.name === 'sequential_thinking') {
+  if (tool?.apiName === 'sequential_thinking' || tool?.apiName === 'sequentialthinking') {
     return BulbOutlined
   }
   if (tool?.category === 'mcp') {
@@ -33,14 +33,14 @@ const InputArea = ({
   inputValue,
   isLoading,
   availableTools,
-  enabledToolNames,
+  enabledToolApiNames,
   thinkingMode,
   isStreaming,
   attachments,
   attachmentsOpen,
   onInputChange,
   onSubmit,
-  onEnabledToolNamesChange,
+  onEnabledToolApiNamesChange,
   onThinkingModeChange,
   onStreamingChange,
   onAttachmentsChange,
@@ -150,17 +150,17 @@ const InputArea = ({
                       选择工具
                     </div>
                     <Checkbox.Group
-                      value={enabledToolNames}
-                      onChange={onEnabledToolNamesChange}
+                      value={enabledToolApiNames}
+                      onChange={onEnabledToolApiNamesChange}
                       style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
                     >
                       {availableTools.map((tool) => {
                         const IconComponent = resolveToolIcon(tool)
                         return (
-                          <Checkbox key={tool.name} value={tool.name}>
+                          <Checkbox key={tool.apiName} value={tool.apiName}>
                             <Flex align="center" gap={4}>
                               <IconComponent />
-                              {tool.displayName || tool.name}
+                              {tool.displayName}
                             </Flex>
                           </Checkbox>
                         )
@@ -174,8 +174,8 @@ const InputArea = ({
                   </div>
                 )}
               >
-                <Switch value={enabledToolNames.length > 0} icon={<ToolOutlined />}>
-                  工具 {enabledToolNames.length > 0 && `(${enabledToolNames.length})`}
+                <Switch value={enabledToolApiNames.length > 0} icon={<ToolOutlined />}>
+                  工具 {enabledToolApiNames.length > 0 && `(${enabledToolApiNames.length})`}
                 </Switch>
               </Dropdown>
 

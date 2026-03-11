@@ -16,7 +16,6 @@ func main() {
 	// 定义命令行标志
 	mode := flag.String("mode", "", "运行模式: server 或 client")
 	httpAddr := flag.String("http-addr", ":8081", "HTTP服务器地址")
-	city := flag.String("city", "", "要查询天气的城市名称")
 	flag.Parse()
 
 	if *mode == "" {
@@ -32,13 +31,6 @@ func main() {
 			log.Fatalf("服务器错误: %v", err)
 		}
 	} else if *mode == "client" {
-		// 运行客户端
-		if *city == "" {
-			fmt.Println("Error: 您必须指定城市名称使用--city")
-			flag.Usage()
-			os.Exit(1)
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -60,16 +52,6 @@ func main() {
 			log.Fatalf("健康检查失败: %v", err)
 		}
 
-		// 调用天气工具
-		result, err := mcpClient.CallWeatherTool(ctx, *city)
-		if err != nil {
-			log.Fatalf("调用工具失败: %v", err)
-		}
-
-		// 显示天气结果
-		fmt.Println("\n天气查询结果:")
-		fmt.Println(mcpClient.GetToolResultText(result))
-
-		fmt.Println("\n客户端初始化成功。正在关闭...")
+		fmt.Println("\n客户端初始化成功。当前示例不再内置 weather 工具调用。正在关闭...")
 	}
 }

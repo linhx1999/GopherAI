@@ -81,7 +81,8 @@ GopherAI/
 - 核心目录：`common/agent/`
 - `manager.go` 负责 Agent 创建、缓存和流式执行
 - `tools/registry.go` 负责内置工具与 MCP 工具注册
-- 请求中的 `tools` 仅代表本轮显式启用工具；未传或为空时不隐式启用默认工具
+- 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
+- Sequential Thinking 官方工具名按 `sequentialthinking` 处理，同时兼容历史别名 `sequential_thinking`
 - Agent 缓存键包含 `sessionID + modelName + toolSignature`，避免不同工具组合复用同一实例
 
 内置工具：
@@ -137,6 +138,8 @@ type Message struct {
 - 未启用工具时，`reasoning_content` 使用 `Think` 展示
 - 启用工具后，前端将 `assistant(tool_calls)`、`tool`、最终 `assistant` 重建为 `ThoughtChain`
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
+- 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
+- 示例 MCP 代码中不再内置 `get_weather` 工具；如需新增 MCP 工具，应在 `common/mcp/server/server.go` 明确注册
 - 首轮请求若未携带 `session_id`，前端在拿到服务端返回的真实会话 ID 后要立即更新 `activeKey`，保证后续续聊复用同一会话
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
 
@@ -181,7 +184,7 @@ type Message struct {
 
 ### Agent 接口约定
 
-- `tools` 字段是请求级显式工具列表，不写入会话配置
+- `tools` 字段是请求级显式工具 API 名称列表，不写入会话配置
 - SSE `data` 直接传 `schema.Message` JSON，不再拆分自定义 delta 事件
 - 历史消息接口只允许读取当前用户自己的会话；前端直接读取 `response.data.data.messages`
 - 会话列表接口只返回当前用户会话；前端直接读取 `response.data.data.sessions`

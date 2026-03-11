@@ -19,7 +19,7 @@ const ginSSEEventName = "message"
 type ChatRequest struct {
 	SessionID    string   `json:"session_id"`                 // 可选，为空则创建新会话
 	Message      string   `json:"message" binding:"required"` // 必填，用户消息内容
-	Tools        []string `json:"tools"`                      // 可选，工具列表
+	Tools        []string `json:"tools"`                      // 可选，工具 API 调用名列表
 	ThinkingMode bool     `json:"thinking_mode"`              // 可选，是否启用思考模型
 }
 
