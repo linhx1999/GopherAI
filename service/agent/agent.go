@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -83,7 +83,7 @@ type preparedChatExecution struct {
 	userRefID                  uint
 	conversation               []*schema.Message
 	firstAssistantMessageIndex int
-	agent                      *react.Agent
+	agent                      adk.Agent
 }
 
 func NewErrorEvent(message string) StreamEvent {
@@ -145,20 +145,15 @@ func persistProducedMessages(session *model.Session, userRefID uint, startIndex 
 	return lastIndex
 }
 
-func buildSystemPrompt(hasEnabledTools bool) string {
+func buildAgentInstruction(hasEnabledTools bool) string {
 	if hasEnabledTools {
 		return baseSystemPrompt + "\n\n当前对话已启用工具；当工具能提升答案质量时，请先调用合适的工具。若使用知识检索，请在回答中标注信息来源。"
 	}
 	return baseSystemPrompt + "\n\n当前对话未启用工具，请直接基于上下文作答。"
 }
 
-func buildConversationMessages(history []*model.Message, userMessage *schema.Message, hasEnabledTools bool) []*schema.Message {
-	messages := make([]*schema.Message, 0, len(history)+2)
-	messages = append(messages, &schema.Message{
-		Role:    schema.System,
-		Content: buildSystemPrompt(hasEnabledTools),
-	})
-
+func buildConversationMessages(history []*model.Message, userMessage *schema.Message) []*schema.Message {
+	messages := make([]*schema.Message, 0, len(history)+1)
 	for _, m := range history {
 		if m == nil {
 			continue
@@ -301,18 +296,24 @@ func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedCh
 	userMessage := schema.UserMessage(req.UserMessage)
 	persistMessage(session.SessionID, buildStoredMessage(session, req.UserRefID, userMessageIndex, userMessage))
 
-	agent, err := agentcommon.GetAgentManager().GetOrCreateAgentForChat(ctx, session.SessionID, req.UserRefID, req.EnabledToolNames, req.ThinkingMode)
+	hasEnabledTools := len(req.EnabledToolNames) > 0
+
+	agent, err := agentcommon.GetAgentManager().CreateAgentForChat(
+		ctx,
+		req.UserRefID,
+		req.EnabledToolNames,
+		req.ThinkingMode,
+		buildAgentInstruction(hasEnabledTools),
+	)
 	if err != nil {
-		log.Println("prepareChatExecution GetOrCreateAgentForChat error:", err)
+		log.Println("prepareChatExecution CreateAgentForChat error:", err)
 		return nil, code.AIModelFail
 	}
-
-	hasEnabledTools := len(req.EnabledToolNames) > 0
 
 	return &preparedChatExecution{
 		session:                    session,
 		userRefID:                  req.UserRefID,
-		conversation:               buildConversationMessages(history, userMessage, hasEnabledTools),
+		conversation:               buildConversationMessages(history, userMessage),
 		firstAssistantMessageIndex: userMessageIndex + 1,
 		agent:                      agent,
 	}, code.CodeSuccess

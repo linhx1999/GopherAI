@@ -79,11 +79,11 @@ GopherAI/
 ### 1. Agent 与工具系统
 
 - 核心目录：`common/agent/`
-- `manager.go` 负责 Agent 创建、缓存和流式执行
+- `manager.go` 负责基于全局 ChatModel 池按请求创建 Eino ADK `ChatModelAgent`
 - `tools/registry.go` 只负责工具注册、聚合和解析；每个内置工具单独放在 `tools/` 下与工具名对应的 Go 文件中
 - 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`
-- Agent 缓存键包含 `sessionID + modelName + toolSignature`，避免不同工具组合复用同一实例
+- `common/llm` 维护按模型名复用的全局 ChatModel 实例池；`thinking_mode` 通过选择不同全局模型实现
 
 内置工具：
 - `knowledge_search`
@@ -96,7 +96,7 @@ GopherAI/
 用户消息 -> Agent 执行 -> SSE 输出 -> Redis 缓存 -> RabbitMQ 异步落 PostgreSQL
 ```
 
-- `common/agent` 基于 `react.WithMessageFuture()` 逐条消费 `schema.Message` 流
+- `common/agent` 基于 Eino ADK `ChatModelAgent` + `Runner` 消费 `AgentEvent`，并提取其中的 `schema.Message`
 - service 层负责会话创建、消息索引分配、持久化和最小 SSE 事件包装
 - controller 层统一通过 Gin `c.Stream(...)` + `c.SSEvent("message", payload)` 输出
 - SSE 仅保留 `meta` / `error` 控制包，其余 `data` 直接发送完整 `schema.Message`
@@ -185,6 +185,7 @@ type Message struct {
 ### Agent 接口约定
 
 - `tools` 字段是请求级显式工具 API 名称列表，不写入会话配置
+- system prompt 通过 ADK `ChatModelAgentConfig.Instruction` 注入；会话消息数组只包含历史消息和当前用户消息
 - SSE `data` 直接传 `schema.Message` JSON，不再拆分自定义 delta 事件
 - 历史消息接口只允许读取当前用户自己的会话；前端直接读取 `response.data.data.messages`
 - 会话列表接口只返回当前用户会话；前端直接读取 `response.data.data.sessions`

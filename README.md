@@ -71,6 +71,7 @@ pnpm dev
 - `GET /api/v1/tools` 同时返回 `name` 和 `display_name`：前者用于 API 调用，后者仅用于前端展示
 - 后端内置工具按工具名拆分到 `common/agent/tools/*.go`；例如 `knowledge_search.go`、`sequential_thinking.go`，`registry.go` 只负责注册和解析
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
+- 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
 - 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
@@ -93,6 +94,10 @@ data: {"role":"assistant","reasoning_content":"先确认约束"}
 data: {"role":"assistant","content":"答案","response_meta":{"finish_reason":"stop"}}
 data: [DONE]
 ```
+
+执行约定：
+- system prompt 由 ADK `ChatModelAgentConfig.Instruction` 承载，不作为首条 system message 写入会话消息数组
+- `thinking_mode` 继续保留，通过选择不同的全局 ChatModel 实例实现，而不是切换 Agent 缓存
 
 ## API 概览
 

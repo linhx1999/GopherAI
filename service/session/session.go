@@ -4,7 +4,6 @@ import (
 	"log"
 	"time"
 
-	agentcommon "GopherAI/common/agent"
 	"GopherAI/common/code"
 	messageDAO "GopherAI/dao/message"
 	"GopherAI/dao/session"
@@ -57,7 +56,6 @@ func DeleteSession(userRefID uint, sessionID string) code.Code {
 	}
 
 	_ = messageDAO.DeleteCachedMessages(sessionID)
-	agentcommon.GetAgentManager().ClearAgent(sessionID)
 
 	return code.CodeSuccess
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,16 +50,28 @@ func TestBuildConversationMessagesUsesStoredSchemaPayload(t *testing.T) {
 	messages := buildConversationMessages(history, &schema.Message{
 		Role:    schema.User,
 		Content: "继续",
-	}, false)
+	})
 
-	if len(messages) != 3 {
+	if len(messages) != 2 {
 		t.Fatalf("unexpected message count: %d", len(messages))
 	}
-	if messages[1].Role != schema.User || messages[1].Content != "你好" {
-		t.Fatalf("unexpected history payload: %#v", messages[1])
+	if messages[0].Role != schema.User || messages[0].Content != "你好" {
+		t.Fatalf("unexpected history payload: %#v", messages[0])
 	}
-	if messages[2].Content != "继续" {
-		t.Fatalf("unexpected user message: %#v", messages[2])
+	if messages[1].Content != "继续" {
+		t.Fatalf("unexpected user message: %#v", messages[1])
+	}
+}
+
+func TestBuildAgentInstructionReflectsToolState(t *testing.T) {
+	withTools := buildAgentInstruction(true)
+	withoutTools := buildAgentInstruction(false)
+
+	if !strings.Contains(withTools, "当前对话已启用工具") {
+		t.Fatalf("expected tool-enabled instruction, got %q", withTools)
+	}
+	if !strings.Contains(withoutTools, "当前对话未启用工具") {
+		t.Fatalf("expected tool-disabled instruction, got %q", withoutTools)
 	}
 }
 

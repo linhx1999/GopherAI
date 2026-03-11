@@ -4,76 +4,104 @@ import (
 	"context"
 	"io"
 
-	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
 type MessageSink func(*schema.Message) error
 
 // CollectAgentMessages 执行同步生成，并返回 Agent 过程中的完整产出消息。
-func CollectAgentMessages(ctx context.Context, runner *react.Agent, input []*schema.Message) ([]*schema.Message, *schema.Message, error) {
-	opt, future := react.WithMessageFuture()
-
-	resp, err := runner.Generate(ctx, input, opt)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	iter := future.GetMessages()
+func CollectAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.Message) ([]*schema.Message, *schema.Message, error) {
+	iter := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent}).Run(ctx, input)
 	produced := make([]*schema.Message, 0, 4)
+	var finalMessage *schema.Message
+
 	for {
-		msg, ok, err := iter.Next()
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+
+		messages, err := collectAgentEventMessages(event, nil)
 		if err != nil {
 			return nil, nil, err
 		}
-		if !ok {
-			break
+		if len(messages) == 0 {
+			continue
 		}
-		produced = append(produced, msg)
+
+		produced = append(produced, messages...)
+		finalMessage = messages[len(messages)-1]
 	}
 
-	return produced, resp, nil
+	return produced, finalMessage, nil
 }
 
 // StreamAgentMessages 执行流式生成，并按原始 chunk 顺序输出 schema.Message。
-func StreamAgentMessages(ctx context.Context, runner *react.Agent, input []*schema.Message, sink MessageSink) ([]*schema.Message, error) {
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func StreamAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.Message, sink MessageSink) ([]*schema.Message, error) {
+	iter := adk.NewRunner(ctx, adk.RunnerConfig{
+		Agent:           agent,
+		EnableStreaming: true,
+	}).Run(ctx, input)
 
-	opt, future := react.WithMessageFuture()
-	runErrCh := make(chan error, 1)
-	go func() {
-		sr, err := runner.Stream(runCtx, input, opt)
-		if sr != nil {
-			sr.Close()
-		}
-		runErrCh <- err
-	}()
-
-	iter := future.GetMessageStreams()
 	produced := make([]*schema.Message, 0, 4)
 	for {
-		sr, ok, err := iter.Next()
-		if err != nil {
-			return nil, err
-		}
+		event, ok := iter.Next()
 		if !ok {
 			break
 		}
 
-		full, err := collectStreamMessage(sr, sink)
+		messages, err := collectAgentEventMessages(event, sink)
 		if err != nil {
 			return nil, err
 		}
-		if full != nil {
-			produced = append(produced, full)
+		if len(messages) == 0 {
+			continue
+		}
+
+		produced = append(produced, messages...)
+	}
+	return produced, nil
+}
+
+func collectAgentEventMessages(event *adk.AgentEvent, sink MessageSink) ([]*schema.Message, error) {
+	if event == nil {
+		return nil, nil
+	}
+	if event.Err != nil {
+		return nil, event.Err
+	}
+	if event.Output == nil || event.Output.MessageOutput == nil {
+		return nil, nil
+	}
+
+	msgOutput := event.Output.MessageOutput
+	if msgOutput.IsStreaming {
+		full, err := collectStreamMessage(msgOutput.MessageStream, sink)
+		if err != nil {
+			return nil, err
+		}
+		if full == nil {
+			return nil, nil
+		}
+		return []*schema.Message{full}, nil
+	}
+
+	msg, err := msgOutput.GetMessage()
+	if err != nil {
+		return nil, err
+	}
+	if msg == nil {
+		return nil, nil
+	}
+
+	if sink != nil {
+		if err := sink(msg); err != nil {
+			return nil, err
 		}
 	}
 
-	if err := <-runErrCh; err != nil {
-		return nil, err
-	}
-	return produced, nil
+	return []*schema.Message{msg}, nil
 }
 
 func collectStreamMessage(sr *schema.StreamReader[*schema.Message], sink MessageSink) (*schema.Message, error) {

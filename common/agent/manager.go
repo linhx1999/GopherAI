@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cloudwego/eino/adk"
 	eino_model "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/flow/agent/react"
 
 	"GopherAI/common/agent/tools"
 	"GopherAI/common/llm"
@@ -18,18 +18,21 @@ import (
 )
 
 // AgentManager Agent 管理器
-type AgentManager struct {
-	mu     sync.RWMutex
-	agents map[string]*react.Agent // cacheKey -> Agent
-}
+type AgentManager struct{}
 
 type AgentSessionConfig struct {
 	EnabledToolNames []string
+	Instruction      string
 	Model            eino_model.ToolCallingChatModel
 	ModelName        string
 	ToolInstances    []tool.BaseTool
 	ToolSignature    string
 }
+
+const (
+	chatAgentName        = "chat_agent"
+	chatAgentDescription = "单 Agent 聊天助手，负责普通问答、工具调用与知识检索。"
+)
 
 var (
 	manager     *AgentManager
@@ -39,15 +42,9 @@ var (
 // GetAgentManager 获取全局 Agent 管理器
 func GetAgentManager() *AgentManager {
 	managerOnce.Do(func() {
-		manager = &AgentManager{
-			agents: make(map[string]*react.Agent),
-		}
+		manager = &AgentManager{}
 	})
 	return manager
-}
-
-func buildAgentCacheKey(sessionID string, modelName string, toolSignature string) string {
-	return fmt.Sprintf("%s::%s::%s", sessionID, modelName, toolSignature)
 }
 
 func buildToolSignature(enabledToolNames []string) string {
@@ -58,7 +55,7 @@ func buildToolSignature(enabledToolNames []string) string {
 	return strings.Join(normalizedNames, ",")
 }
 
-func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID uint, enabledToolNames []string, thinkingMode bool) (*AgentSessionConfig, error) {
+func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID uint, enabledToolNames []string, thinkingMode bool, instruction string) (*AgentSessionConfig, error) {
 	client := llm.GetLLMClient()
 	if client == nil {
 		return nil, fmt.Errorf("llm client not initialized")
@@ -87,6 +84,7 @@ func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID 
 
 	return &AgentSessionConfig{
 		EnabledToolNames: normalizedToolNames,
+		Instruction:      instruction,
 		Model:            model,
 		ModelName:        modelName,
 		ToolInstances:    toolInstances,
@@ -94,66 +92,36 @@ func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID 
 	}, nil
 }
 
-func (m *AgentManager) buildAgent(ctx context.Context, config *AgentSessionConfig) (*react.Agent, error) {
+func (m *AgentManager) buildAgent(ctx context.Context, config *AgentSessionConfig) (adk.Agent, error) {
 	if config == nil || config.Model == nil {
 		return nil, fmt.Errorf("agent config not available")
 	}
 
-	log.Printf("Creating agent with model=%s, tools=%v", config.ModelName, config.EnabledToolNames)
+	log.Printf("Creating ADK chat agent with model=%s, tool_signature=%s", config.ModelName, config.ToolSignature)
 
-	agent, err := react.NewAgent(ctx, &react.AgentConfig{
-		ToolCallingModel: config.Model,
-		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: config.ToolInstances,
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name:        chatAgentName,
+		Description: chatAgentDescription,
+		Instruction: config.Instruction,
+		Model:       config.Model,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: config.ToolInstances,
+			},
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create react agent failed: %w", err)
+		return nil, fmt.Errorf("create adk chat model agent failed: %w", err)
 	}
 
 	return agent, nil
 }
 
-// GetOrCreateAgentForChat 获取或创建指定模型和工具配置的 Agent。
-func (m *AgentManager) GetOrCreateAgentForChat(ctx context.Context, sessionID string, userRefID uint, enabledToolNames []string, thinkingMode bool) (*react.Agent, error) {
-	config, err := m.resolveAgentSessionConfig(ctx, userRefID, enabledToolNames, thinkingMode)
+// CreateAgentForChat 基于当前请求创建一个新的 ChatModelAgent。
+func (m *AgentManager) CreateAgentForChat(ctx context.Context, userRefID uint, enabledToolNames []string, thinkingMode bool, instruction string) (adk.Agent, error) {
+	config, err := m.resolveAgentSessionConfig(ctx, userRefID, enabledToolNames, thinkingMode, instruction)
 	if err != nil {
 		return nil, err
 	}
-	cacheKey := buildAgentCacheKey(sessionID, config.ModelName, config.ToolSignature)
-
-	m.mu.RLock()
-	if agent, ok := m.agents[cacheKey]; ok {
-		m.mu.RUnlock()
-		return agent, nil
-	}
-	m.mu.RUnlock()
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if agent, ok := m.agents[cacheKey]; ok {
-		return agent, nil
-	}
-
-	agent, err := m.buildAgent(ctx, config)
-	if err != nil {
-		return nil, err
-	}
-
-	m.agents[cacheKey] = agent
-	return agent, nil
-}
-
-// ClearAgent 清除指定会话的 Agent 缓存
-func (m *AgentManager) ClearAgent(sessionID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.agents, sessionID)
-	prefix := sessionID + "::"
-	for key := range m.agents {
-		if strings.HasPrefix(key, prefix) {
-			delete(m.agents, key)
-		}
-	}
+	return m.buildAgent(ctx, config)
 }
