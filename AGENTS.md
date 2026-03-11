@@ -119,6 +119,14 @@ type Message struct {
 }
 ```
 
+### Session 模型约定
+
+- `model.Session` 使用 `gorm.Model` 管理数据库主键、时间字段和软删除
+- 对外会话标识统一使用 `Session.SessionID`（UUID），HTTP `session_id`、前端 `sessionId`、消息表 `Message.SessionID` 都基于该业务字段
+- `Session` 只保存会话元数据，不持久化工具列表；工具开关完全由请求级 `tools` 决定
+- DAO 查询、删除、改标题必须按 `session_id + user_name` 过滤，不能再把数据库自增主键暴露到业务层
+- 该模型不兼容旧的字符串主键 `sessions` 表；启动时若检测到旧结构，应直接删除旧表并按新模型重建
+
 ### 3. 前端聊天渲染约定
 
 - 实时 SSE 消息使用 `renderMode=stream`，历史消息使用 `renderMode=instant`

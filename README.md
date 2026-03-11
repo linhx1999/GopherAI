@@ -66,10 +66,19 @@ pnpm dev
 - 历史消息接口返回 `{ index, message, created_at }`，其中 `message` 为完整 `schema.Message`
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，保证非流式生成后立即刷新也能读到最新 `reasoning_content`
 - 后端通过领域 DAO 访问 Redis；service 只负责决定何时读写缓存与何时回源 PostgreSQL
+- Session 表采用 `gorm.Model` 作为数据库主键与时间字段；对外仍统一使用 UUID 类型的业务 `session_id`
+- Session 模型不持久化工具列表；工具启用状态仅来自当前请求的 `tools`
 - 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 - 前端基于 Ant Design 6 开发时，优先使用 `variant`、`orientation` 等新属性，避免继续使用 `bordered`、`direction` 这类已弃用 API
+
+## Session 模型说明
+
+- 数据库层：`sessions.id` 为 `gorm.Model` 提供的自增主键
+- 业务层：`sessions.session_id` 为 UUID，会话接口、消息链路、前端状态绑定都使用该字段
+- `Session` 仅存储会话元数据，不保存工具开关；每轮可用工具由请求体 `tools` 决定
+- 旧版字符串主键 `sessions` 表不会做数据兼容；服务启动时检测到旧结构会直接删除并按新模型重建
 
 ### SSE 示例
 

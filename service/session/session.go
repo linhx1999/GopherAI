@@ -21,7 +21,7 @@ func GetUserSessionsByUserName(userName string) ([]model.SessionInfo, error) {
 	sessionInfos := make([]model.SessionInfo, 0, len(sessions))
 	for _, s := range sessions {
 		sessionInfos = append(sessionInfos, model.SessionInfo{
-			SessionID: s.ID,
+			SessionID: s.SessionID,
 			Title:     s.Title,
 			CreatedAt: s.CreatedAt.Format(time.RFC3339),
 		})

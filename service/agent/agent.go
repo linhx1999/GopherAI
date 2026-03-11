@@ -258,16 +258,16 @@ func buildHistoryMessageItems(msgs []*model.Message) []HistoryMessageItem {
 
 func createSession(userName string, title string) (string, code.Code) {
 	newSession := &model.Session{
-		ID:       uuid.New().String(),
-		UserName: userName,
-		Title:    title,
+		SessionID: uuid.New().String(),
+		UserName:  userName,
+		Title:     title,
 	}
 	createdSession, err := sessionDAO.CreateSession(newSession)
 	if err != nil {
 		log.Println("createSession error:", err)
 		return "", code.CodeServerBusy
 	}
-	return createdSession.ID, code.CodeSuccess
+	return createdSession.SessionID, code.CodeSuccess
 }
 
 func prepareChatExecution(ctx context.Context, req GenerateRequest) (*preparedChatExecution, code.Code) {
