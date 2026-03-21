@@ -36,7 +36,7 @@ func UploadRagFile(c *gin.Context) {
 	}
 
 	username := c.GetString("userName")
-	userRefID := c.GetUint("userRefID")
+	userID := c.GetUint("userID")
 	if username == "" {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
@@ -46,7 +46,7 @@ func UploadRagFile(c *gin.Context) {
 		return
 	}
 
-	fileRecord, err := fileService.UploadRagFile(userRefID, username, uploadedFile)
+	fileRecord, err := fileService.UploadRagFile(userID, username, uploadedFile)
 	if err != nil {
 		log.Println("UploadFile fail ", err)
 		c.JSON(http.StatusOK, controller.Response{
@@ -73,8 +73,8 @@ func UploadRagFile(c *gin.Context) {
 
 // GetFileList 获取用户文件列表
 func GetFileList(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
-	if userRefID == 0 {
+	userID := c.GetUint("userID")
+	if userID == 0 {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidToken,
@@ -83,7 +83,7 @@ func GetFileList(c *gin.Context) {
 		return
 	}
 
-	files, err := fileService.GetFileList(userRefID)
+	files, err := fileService.GetFileList(userID)
 	if err != nil {
 		log.Println("GetFileList fail ", err)
 		c.JSON(http.StatusOK, controller.Response{
@@ -116,8 +116,8 @@ func GetFileList(c *gin.Context) {
 
 // DeleteFile 删除文件
 func DeleteFile(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
-	if userRefID == 0 {
+	userID := c.GetUint("userID")
+	if userID == 0 {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidToken,
@@ -136,7 +136,7 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
-	if err := fileService.DeleteFile(fileID, userRefID); err != nil {
+	if err := fileService.DeleteFile(fileID, userID); err != nil {
 		log.Println("DeleteFile fail ", err)
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeServerBusy,
@@ -153,8 +153,8 @@ func DeleteFile(c *gin.Context) {
 
 // GetFileURL 获取文件访问 URL
 func GetFileURL(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
-	if userRefID == 0 {
+	userID := c.GetUint("userID")
+	if userID == 0 {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidToken,
@@ -173,7 +173,7 @@ func GetFileURL(c *gin.Context) {
 		return
 	}
 
-	url, err := fileService.GetFileURL(fileID, userRefID)
+	url, err := fileService.GetFileURL(fileID, userID)
 	if err != nil {
 		log.Println("GetFileURL fail ", err)
 		c.JSON(http.StatusOK, controller.Response{
@@ -192,8 +192,8 @@ func GetFileURL(c *gin.Context) {
 
 // DownloadFile 下载文件
 func DownloadFile(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
-	if userRefID == 0 {
+	userID := c.GetUint("userID")
+	if userID == 0 {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidToken,
@@ -212,7 +212,7 @@ func DownloadFile(c *gin.Context) {
 		return
 	}
 
-	reader, fileRecord, err := fileService.DownloadFileContent(fileID, userRefID)
+	reader, fileRecord, err := fileService.DownloadFileContent(fileID, userID)
 	if err != nil {
 		log.Println("DownloadFile fail ", err)
 		c.JSON(http.StatusOK, controller.Response{
@@ -234,8 +234,8 @@ func DownloadFile(c *gin.Context) {
 
 // IndexFile 手动触发文件索引
 func IndexFile(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
-	if userRefID == 0 {
+	userID := c.GetUint("userID")
+	if userID == 0 {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidToken,
@@ -259,7 +259,7 @@ func IndexFile(c *gin.Context) {
 
 	// 异步执行索引（避免阻塞请求）
 	go func() {
-		if err := ragSvc.IndexFile(fileID, userRefID); err != nil {
+		if err := ragSvc.IndexFile(fileID, userID); err != nil {
 			log.Printf("Failed to index file %s: %v", fileID, err)
 		}
 	}()
@@ -272,8 +272,8 @@ func IndexFile(c *gin.Context) {
 
 // DeleteFileIndex 删除文件索引
 func DeleteFileIndex(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
-	if userRefID == 0 {
+	userID := c.GetUint("userID")
+	if userID == 0 {
 		log.Println("Username not found in context")
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeInvalidToken,
@@ -295,7 +295,7 @@ func DeleteFileIndex(c *gin.Context) {
 	// 创建 RAG 服务实例
 	ragSvc := &ragService.RAGService{}
 
-	if err := ragSvc.DeleteIndex(fileID, userRefID); err != nil {
+	if err := ragSvc.DeleteIndex(fileID, userID); err != nil {
 		log.Println("DeleteFileIndex fail: ", err)
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeServerBusy,

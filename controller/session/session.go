@@ -15,9 +15,9 @@ type UpdateSessionTitleRequest struct {
 }
 
 func GetUserSessionsByUserName(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
+	userID := c.GetUint("userID")
 
-	userSessions, err := sessionService.GetUserSessionsByUserRefID(userRefID)
+	userSessions, err := sessionService.GetUserSessionsByUserRefID(userID)
 	if err != nil {
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code.CodeServerBusy,
@@ -34,7 +34,7 @@ func GetUserSessionsByUserName(c *gin.Context) {
 }
 
 func DeleteSession(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
+	userID := c.GetUint("userID")
 	sessionID := c.Param("session_id")
 
 	if sessionID == "" {
@@ -45,7 +45,7 @@ func DeleteSession(c *gin.Context) {
 		return
 	}
 
-	code_ := sessionService.DeleteSession(userRefID, sessionID)
+	code_ := sessionService.DeleteSession(userID, sessionID)
 	if code_ != code.CodeSuccess {
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code_,
@@ -61,7 +61,7 @@ func DeleteSession(c *gin.Context) {
 }
 
 func UpdateSessionTitle(c *gin.Context) {
-	userRefID := c.GetUint("userRefID")
+	userID := c.GetUint("userID")
 	sessionID := c.Param("session_id")
 
 	if sessionID == "" {
@@ -81,7 +81,7 @@ func UpdateSessionTitle(c *gin.Context) {
 		return
 	}
 
-	code_ := sessionService.UpdateSessionTitle(userRefID, sessionID, req.Title)
+	code_ := sessionService.UpdateSessionTitle(userID, sessionID, req.Title)
 	if code_ != code.CodeSuccess {
 		c.JSON(http.StatusOK, controller.Response{
 			Code: code_,
