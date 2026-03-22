@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino-ext/components/tool/sequentialthinking"
-	"github.com/cloudwego/eino/components/tool"
 )
 
 const (
@@ -14,16 +13,9 @@ const (
 	sequentialThinkingDescription = "使用逐步思考流程拆解复杂问题，输出结构化的思考过程和中间结论。"
 )
 
-type sequentialThinking struct {
-	name        string
-	displayName string
-	description string
-	tool        tool.BaseTool
-}
-
 var SequentialThinkingTool = initSequentialThinking()
 
-func initSequentialThinking() sequentialThinking {
+func initSequentialThinking() Tool {
 	tool, err := sequentialthinking.NewTool()
 	if err != nil {
 		panic(fmt.Sprintf("create sequentialthinking tool definition failed: %v", err))
@@ -42,7 +34,7 @@ func initSequentialThinking() sequentialThinking {
 		panic("load sequentialthinking tool info failed: empty name")
 	}
 
-	return sequentialThinking{
+	return Tool{
 		name:        toolName,
 		displayName: sequentialThinkingDisplayName,
 		description: sequentialThinkingDescription,

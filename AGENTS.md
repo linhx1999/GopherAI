@@ -80,15 +80,15 @@ GopherAI/
 
 - 核心目录：`common/agent/`
 - `manager.go` 负责基于全局 ChatModel 池按请求创建 Eino ADK `ChatModelAgent`
-- `tools/registry.go` 仅维护全局工具 map；后端按请求中的工具名直接构造 `[]tool.BaseTool`
+- `common/agent/tools/` 维护工具实现与本地工具定义；目录下除工具文件外，仅保留 `manager.go`（内部管理）和 `interface.go`（对外接口），后端在 `manager.go` 中按请求中的工具名直接构造 `[]tool.BaseTool`
 - 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
-- 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`
+- 内置工具标准调用名保持为 `knowledge_search` 和 `sequentialthinking`
 - 请求中的未知工具名属于参数错误，必须在创建会话、写入消息和调用模型前被拦截
 - `common/llm` 维护按模型名复用的全局 ChatModel 实例池；`thinking_mode` 通过选择不同全局模型实现
 
 内置工具：
 - `knowledge_search`
-- `sequential_thinking`
+- `sequentialthinking`
 
 ### 2. 流式消息链路
 
@@ -151,7 +151,8 @@ type Message struct {
 - 列表滚动统一通过 `Bubble.ListRef.scrollTo` 控制；自动下滑只在用户当前接近底部且位于最后一页时生效
 - 当 `Bubble.List` 内容在持续增长时，`scrollTo({ top: 'bottom', behavior: 'smooth' })` 可能被组件内部兼容逻辑退化为 `instant`，以保证列表继续贴底
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
-- 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
+- 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名，返回结构固定为 `name` / `display_name` / `description`；前端不能把展示名回传给后端
+- `sequentialthinking` 由 `common/agent/tools/sequential_thinking.go` 中的本地包装类型 `sequentialThinking` 统一维护工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`common/agent/tools/manager.go` 与 `interface.go` 负责基于该定义输出工具目录并为每次请求创建独立实例，避免跨请求共享思维链状态
 - 点击“新建会话”仍只创建本地临时会话；首轮流式发送前前端必须先调用 `POST /api/v1/sessions`，拿到真实 `sessionId` 后再更新 `activeKey` 并发起 `/agent/stream`
 - `/agent/stream` 的 SSE 不再下发 `message_index`；前端按 `response.*` 事件顺序驱动当前消息与 ThoughtChain 状态
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
@@ -317,7 +318,7 @@ type Response struct {
 ### 添加新的 Agent 工具
 
 1. 在 `common/agent/tools/` 新增对应工具文件
-2. 在全局工具 map 中注册该工具描述与构造函数
+2. 在工具文件或工具目录定义中补充展示元信息，并在 `manager.go` 中接入对应实例构造逻辑
 
 ### 添加模型能力
 

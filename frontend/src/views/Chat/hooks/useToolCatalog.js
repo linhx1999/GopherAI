@@ -12,9 +12,7 @@ const parseToolCatalogResponse = (responseData) => {
     .map((tool) => ({
       apiName: String(tool?.name || tool?.api_name || '').trim(),
       displayName: String(tool?.display_name || tool?.displayName || tool?.name || tool?.api_name || '').trim(),
-      description: String(tool?.description || '').trim(),
-      category: String(tool?.category || '').trim(),
-      parameters: tool?.parameters || {}
+      description: String(tool?.description || '').trim()
     }))
     .filter((tool) => tool.apiName)
 }

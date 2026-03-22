@@ -55,6 +55,10 @@ func buildToolSignature(enabledToolNames []string) string {
 	return strings.Join(normalizedNames, ",")
 }
 
+func buildToolInstances(ctx context.Context, normalizedToolNames []string, fileRefIDs []uint) ([]tool.BaseTool, error) {
+	return tools.BuildRequestedTools(ctx, normalizedToolNames, fileRefIDs)
+}
+
 func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID uint, enabledToolNames []string, thinkingMode bool, instruction string) (*AgentSessionConfig, error) {
 	client := llm.GetLLMClient()
 	if client == nil {
@@ -76,7 +80,7 @@ func (m *AgentManager) resolveAgentSessionConfig(ctx context.Context, userRefID 
 	}
 
 	normalizedToolNames := tools.NormalizeToolNames(enabledToolNames)
-	toolInstances, err := tools.BuildRequestedTools(ctx, normalizedToolNames, fileRefIDs)
+	toolInstances, err := buildToolInstances(ctx, normalizedToolNames, fileRefIDs)
 	if err != nil {
 		return nil, fmt.Errorf("build tools failed: %w", err)
 	}

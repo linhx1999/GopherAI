@@ -17,6 +17,15 @@ const (
 	knowledgeSearchToolDescription = "从知识库中检索相关文档。当用户问题涉及已上传的文档内容时，使用此工具获取相关信息。"
 )
 
+var knowledgeSearchToolDefinition = toolDefinition{
+	name:        knowledgeSearchToolName,
+	displayName: knowledgeSearchToolDisplayName,
+	description: knowledgeSearchToolDescription,
+	build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, error) {
+		return newKnowledgeSearchTool(fileRefIDs), nil
+	},
+}
+
 // RAGTool RAG 检索工具
 type RAGTool struct {
 	fileRefIDs []uint // 可检索的文件内部 ID 列表
@@ -109,26 +118,6 @@ func newKnowledgeSearchTool(fileRefIDs []uint) tool.InvokableTool {
 	return &RAGTool{fileRefIDs: fileRefIDs}
 }
 
-func knowledgeSearchDescriptor() localToolDescriptor {
-	return localToolDescriptor{
-		Name:        knowledgeSearchToolName,
-		DisplayName: knowledgeSearchToolDisplayName,
-		Description: knowledgeSearchToolDescription,
-		Parameters: map[string]interface{}{
-			"query": map[string]interface{}{
-				"type":        "string",
-				"description": "检索查询语句",
-				"required":    true,
-			},
-			"top_k": map[string]interface{}{
-				"type":        "number",
-				"description": "返回的相关文档数量，默认为 5",
-				"required":    false,
-			},
-		},
-		Category: "rag",
-		Build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, error) {
-			return newKnowledgeSearchTool(fileRefIDs), nil
-		},
-	}
+func GetKnowledgeSearchTool(fileRefIDs []uint) tool.BaseTool {
+	return newKnowledgeSearchTool(fileRefIDs)
 }

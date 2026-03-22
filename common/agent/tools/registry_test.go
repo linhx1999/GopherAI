@@ -8,51 +8,82 @@ import (
 
 func TestNormalizeToolNamesPreservesRequestOrder(t *testing.T) {
 	names := NormalizeToolNames([]string{
-		" sequential_thinking ",
+		" sequentialthinking ",
 		"knowledge_search",
-		"sequential_thinking",
+		"sequentialthinking",
 		"",
 		"knowledge_search",
 	})
 
-	expected := []string{"sequential_thinking", "knowledge_search"}
+	expected := []string{"sequentialthinking", "knowledge_search"}
 	if !reflect.DeepEqual(names, expected) {
 		t.Fatalf("unexpected normalized names: %#v", names)
 	}
 }
 
-func TestBuildRequestedToolsReturnsUnknownToolError(t *testing.T) {
-	_, err := BuildRequestedTools(context.Background(), []string{"missing_tool"}, nil)
-	if err == nil {
-		t.Fatal("expected unknown tool error")
+func TestListAvailableToolsReturnsGlobalToolMap(t *testing.T) {
+	toolList := ListAvailableTools()
+	if len(toolList) != 2 {
+		t.Fatalf("unexpected tool count: %d", len(toolList))
 	}
-	if !IsUnknownToolError(err) {
-		t.Fatalf("expected unknown tool error, got %T", err)
+
+	actualNames := []string{toolList[0].Name, toolList[1].Name}
+	expectedNames := []string{"knowledge_search", "sequentialthinking"}
+	if !reflect.DeepEqual(actualNames, expectedNames) {
+		t.Fatalf("unexpected tool list: %#v", actualNames)
+	}
+
+	sequentialThinkingTool := toolList[1]
+	if toolList[0].Name == SequentialThinkingToolName() {
+		sequentialThinkingTool = toolList[0]
+	}
+	if sequentialThinkingTool.Name != SequentialThinkingToolName() {
+		t.Fatalf("unexpected sequentialthinking tool name: %q", sequentialThinkingTool.Name)
+	}
+	if sequentialThinkingTool.DisplayName == "" || sequentialThinkingTool.Description == "" {
+		t.Fatalf("expected sequentialthinking tool catalog fields, got %#v", sequentialThinkingTool)
 	}
 }
 
-func TestBuildRequestedToolsPreservesRequestOrder(t *testing.T) {
-	builtTools, err := BuildRequestedTools(context.Background(), []string{
-		"sequential_thinking",
-		"knowledge_search",
-		"sequential_thinking",
-	}, nil)
+func TestGetSequentialThinkingToolReturnsFreshInstances(t *testing.T) {
+	firstTool, err := GetSequentialThinkingTool()
 	if err != nil {
-		t.Fatalf("BuildRequestedTools returned error: %v", err)
+		t.Fatalf("GetSequentialThinkingTool returned error: %v", err)
 	}
 
-	expectedNames := []string{"sequential_thinking", "knowledge_search"}
-	actualNames := make([]string, 0, len(builtTools))
-	for _, builtTool := range builtTools {
-		info, infoErr := builtTool.Info(context.Background())
-		if infoErr != nil {
-			t.Fatalf("tool info error: %v", infoErr)
-		}
-		actualNames = append(actualNames, info.Name)
+	secondTool, err := GetSequentialThinkingTool()
+	if err != nil {
+		t.Fatalf("GetSequentialThinkingTool returned error: %v", err)
 	}
 
-	if !reflect.DeepEqual(actualNames, expectedNames) {
-		t.Fatalf("unexpected tool order: %#v", actualNames)
+	if reflect.ValueOf(firstTool).Pointer() == reflect.ValueOf(secondTool).Pointer() {
+		t.Fatal("expected sequentialthinking tool instances to be isolated per build")
+	}
+
+	firstInfo, err := firstTool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("first tool info error: %v", err)
+	}
+	secondInfo, err := secondTool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("second tool info error: %v", err)
+	}
+
+	if firstInfo.Name != SequentialThinkingToolName() || secondInfo.Name != SequentialThinkingToolName() {
+		t.Fatalf("unexpected sequentialthinking runtime name: %q, %q", firstInfo.Name, secondInfo.Name)
+	}
+}
+
+func TestSequentialThinkingToolDefinitionKeepsInitializedTool(t *testing.T) {
+	if SequentialThinkingTool.tool == nil {
+		t.Fatal("expected sequentialthinking definition to keep initialized upstream tool")
+	}
+}
+
+func TestBuildRequestedToolsReturnsUnknownToolError(t *testing.T) {
+	_, err := BuildRequestedTools(context.Background(), []string{"missing_tool"}, nil)
+	if !IsUnknownToolError(err) {
+		t.Fatalf("expected unknown tool error, got %T", err)
 	}
 }
 
@@ -71,18 +102,5 @@ func TestBuildRequestedToolsInjectsKnowledgeSearchWithoutIndexedFiles(t *testing
 	}
 	if info.Name != "knowledge_search" {
 		t.Fatalf("unexpected tool name: %q", info.Name)
-	}
-}
-
-func TestListAvailableToolsReturnsGlobalToolMap(t *testing.T) {
-	toolList := ListAvailableTools()
-	if len(toolList) != 2 {
-		t.Fatalf("unexpected tool count: %d", len(toolList))
-	}
-
-	actualNames := []string{toolList[0].Name, toolList[1].Name}
-	expectedNames := []string{"sequential_thinking", "knowledge_search"}
-	if !reflect.DeepEqual(actualNames, expectedNames) {
-		t.Fatalf("unexpected tool list: %#v", actualNames)
 	}
 }

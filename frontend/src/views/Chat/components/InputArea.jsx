@@ -6,22 +6,18 @@ import {
   ToolOutlined,
   ThunderboltOutlined,
   SearchOutlined,
-  BulbOutlined,
-  CloudOutlined
+  BulbOutlined
 } from '@ant-design/icons'
 import { Sender, Attachments } from '@ant-design/x'
 
 const Switch = Sender.Switch
 
 const resolveToolIcon = (tool) => {
-  if (tool?.category === 'rag' || tool?.apiName === 'knowledge_search') {
+  if (tool?.apiName === 'knowledge_search') {
     return SearchOutlined
   }
-  if (tool?.apiName === 'sequential_thinking') {
+  if (tool?.apiName === 'sequentialthinking') {
     return BulbOutlined
-  }
-  if (tool?.category === 'mcp') {
-    return CloudOutlined
   }
   return ToolOutlined
 }
