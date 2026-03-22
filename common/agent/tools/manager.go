@@ -29,7 +29,7 @@ var BuiltInTools []Tool
 func init() {
 	BuiltInTools = []Tool{
 		SequentialThinkingTool,
-		knowledgeSearchToolDefinition,
+		KnowledgeSearchTool,
 	}
 }
 

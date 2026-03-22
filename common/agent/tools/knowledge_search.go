@@ -17,13 +17,11 @@ const (
 	knowledgeSearchToolDescription = "从知识库中检索相关文档。当用户问题涉及已上传的文档内容时，使用此工具获取相关信息。"
 )
 
-var knowledgeSearchToolDefinition = toolDefinition{
+var KnowledgeSearchTool = Tool{
 	name:        knowledgeSearchToolName,
 	displayName: knowledgeSearchToolDisplayName,
 	description: knowledgeSearchToolDescription,
-	build: func(ctx context.Context, fileRefIDs []uint) (tool.BaseTool, error) {
-		return newKnowledgeSearchTool(fileRefIDs), nil
-	},
+	tool:        newKnowledgeSearchTool([]uint{}),
 }
 
 // RAGTool RAG 检索工具
