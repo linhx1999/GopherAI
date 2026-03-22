@@ -86,6 +86,7 @@ pnpm dev
 - assistant 同时带有 `reasoning_content` 与 `tool_calls` 时，思考内容会保留为独立的“深度思考”步骤，不再并入首个工具调用步骤说明
 - 当同一条 assistant 同时包含多段思考与工具步骤时，ThoughtChain 严格按步骤产生的时间顺序展示；典型顺序为“第一次深度思考 -> 工具调用 -> 工具结果 -> 第二次深度思考”
 - ThoughtChain 通过 `defaultExpandedKeys` 默认展开全部步骤；思考内容、工具参数和工具结果首次渲染时都会直接展示，用户仍可手动折叠
+- “深度思考”步骤会随状态切换描述文案：思考中显示“模型思考”，完成后显示“思考完成”，异常时显示“思考中断”
 - 前端识别“工具调用 assistant 消息”时，以 `response_meta.finish_reason=tool_calls` 为准；即使最终 assistant completed 仍携带历史 `tool_calls`，也必须继续渲染最终回答 bubble
 - 无工具但有 `reasoning_content` 的回答，也会显示单个 ThoughtChain 思考步骤；最终 assistant 完整消息仍保留为正文 bubble
 - 历史消息与流式消息共用同一套 ThoughtChain 聚合规则，刷新后步骤顺序、描述和工具结果展示应与流式过程保持一致

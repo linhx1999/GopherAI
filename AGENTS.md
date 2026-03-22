@@ -142,6 +142,7 @@ type Message struct {
 - assistant 完整消息若包含 `tool_calls`，思考内容保留为独立步骤，工具调用步骤的 `description` 仅承载调用前正文或简短说明，步骤 `title` 使用工具目录中的 API 名称映射展示名
 - 当同一条 assistant 同时存在多段思考和工具步骤时，ThoughtChain 必须按步骤产生的时间顺序展示；典型顺序为“第一次深度思考 -> 工具调用 -> 工具结果 -> 第二次深度思考”
 - ThoughtChain 统一通过 `defaultExpandedKeys` 默认展开全部步骤；reasoning 内容、工具调用参数和工具执行结果首次渲染时都应直接展示，用户可再手动折叠
+- “深度思考”步骤的描述文案必须随状态切换：`loading` 显示“模型思考”，`success` 显示“思考完成”，`error` 显示“思考中断”
 - 前端识别“工具调用 assistant 消息”时，以 `response_meta.finish_reason=tool_calls` 为准；最终 assistant completed 即使仍附带历史 `tool_calls`，也必须继续渲染最终回答 bubble
 - `role=tool` 的完整消息作为独立结果步骤挂到同一条 assistant 记录下；最终 assistant 完整消息才保留为正文 bubble
 - 仅携带 metadata 的空 assistant delta 不应单独渲染成气泡

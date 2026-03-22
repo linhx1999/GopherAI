@@ -234,13 +234,14 @@ const getTraceStatus = (traceRecord = {}) => {
 const buildReasoningItems = (traceRecord) => {
   const status = getTraceStatus(traceRecord)
   const reasoningContent = String(traceRecord.message?.reasoning_content || '').trim()
+  const description = status === TOOL_TRACE_STATUS.ERROR
+    ? '思考中断'
+    : (status === TOOL_TRACE_STATUS.SUCCESS ? '思考完成' : '模型思考')
 
   return [{
     key: `${traceRecord.key}-reasoning`,
     title: '深度思考',
-    description: status === TOOL_TRACE_STATUS.ERROR
-      ? '思考中断'
-      : (reasoningContent ? '模型正在拆解问题' : '正在分析问题'),
+    description,
     content: reasoningContent ? (
       <div className="thought-chain-markdown">
         {renderMarkdown(reasoningContent)}
