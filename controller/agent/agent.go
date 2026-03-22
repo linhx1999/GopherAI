@@ -80,7 +80,7 @@ func StreamHandler(c *gin.Context) {
 		req.ThinkingMode,
 	)
 	if code_ != code.CodeSuccess {
-		streamSSE(c, errorEventStream(code_, ""))
+		streamSSE(c, errorEventStream(code_, code_.Msg()))
 		return
 	}
 
