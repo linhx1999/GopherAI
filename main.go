@@ -1,6 +1,7 @@
 package main
 
 import (
+	commondeep "GopherAI/common/deepagent"
 	"GopherAI/common/llm"
 	"GopherAI/common/minio"
 	"GopherAI/common/postgres"
@@ -52,6 +53,15 @@ func main() {
 		// 不阻止服务启动，允许后续重试
 	} else {
 		log.Println("llm client init success")
+	}
+
+	if commondeep.FeatureEnabled() {
+		if err := commondeep.Init(context.Background()); err != nil {
+			log.Println("InitDeepAgent error, " + err.Error())
+		} else {
+			commondeep.StartReaper(context.Background())
+			log.Println("deep agent runtime init success")
+		}
 	}
 
 	err := StartServer(host, port)

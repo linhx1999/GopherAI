@@ -48,6 +48,11 @@ export const API_ENDPOINTS = {
   AGENT_GENERATE: 'agent/generate',                    // POST: 非流式生成
   AGENT_STREAM: 'agent/stream',                        // POST: 流式生成
   AGENT_MESSAGES: (sessionId) => `agent/${sessionId}/messages`, // GET: 获取消息列表
+  DEEP_AGENT_GENERATE: 'deep-agent/generate',
+  DEEP_AGENT_STREAM: 'deep-agent/stream',
+  DEEP_AGENT_RUNTIME: 'deep-agent/runtime',
+  DEEP_AGENT_RUNTIME_RESTART: 'deep-agent/runtime/restart',
+  DEEP_AGENT_RUNTIME_REBUILD: 'deep-agent/runtime/rebuild',
 
   // 工具接口
   TOOLS: 'tools',                                      // GET: 获取工具列表
@@ -120,4 +125,9 @@ export const TOOL_TRACE_STATUS = {
 // ==================== 特殊会话 ID ====================
 export const SPECIAL_SESSIONS = {
   TEMP: 'temp',
+}
+
+export const AGENT_MODES = {
+  CHAT: 'chat',
+  DEEP: 'deep',
 }

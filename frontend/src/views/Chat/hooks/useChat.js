@@ -4,6 +4,7 @@ import api, { API_BASE_URL } from '../../../utils/api'
 import { getStoredToken, handleUnauthorized, isUnauthorizedResponseCode } from '../../../utils/auth'
 import useToolCatalog from './useToolCatalog'
 import {
+  AGENT_MODES,
   ASSISTANT_DISPLAY_MODES,
   MESSAGE_LIST_BOTTOM_THRESHOLD,
   MESSAGE_PAGE_SIZE,
@@ -297,12 +298,15 @@ const useChat = () => {
   const latestHistorySessionRef = useRef(null)
   const activeKeyRef = useRef(null)
   const isTempSessionRef = useRef(false)
-  const { availableTools, availableMCPServers, mcpFeatureEnabled } = useToolCatalog()
+  const { availableTools, availableMCPServers, mcpFeatureEnabled, deepAgentEnabled } = useToolCatalog()
 
   const [enabledToolAPINames, setEnabledToolAPINames] = useState([])
   const [enabledMCPServerIDs, setEnabledMCPServerIDs] = useState([])
+  const [agentMode, setAgentMode] = useState(AGENT_MODES.CHAT)
   const [thinkingMode, setThinkingMode] = useState(true)
   const [isStreaming, setIsStreaming] = useState(true)
+  const [deepAgentRuntime, setDeepAgentRuntime] = useState(null)
+  const [deepAgentRuntimeLoading, setDeepAgentRuntimeLoading] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -374,6 +378,90 @@ const useChat = () => {
       console.error('Load sessions error:', error)
     }
   }, [])
+
+  useEffect(() => {
+    if (!deepAgentEnabled && agentMode === AGENT_MODES.DEEP) {
+      setAgentMode(AGENT_MODES.CHAT)
+      setDeepAgentRuntime(null)
+    }
+  }, [agentMode, deepAgentEnabled])
+
+  const loadDeepAgentRuntime = useCallback(async () => {
+    if (!deepAgentEnabled) {
+      setDeepAgentRuntime(null)
+      return null
+    }
+
+    setDeepAgentRuntimeLoading(true)
+    try {
+      const response = await api.get(API_ENDPOINTS.DEEP_AGENT_RUNTIME)
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
+        const runtime = response.data?.data?.runtime || null
+        setDeepAgentRuntime(runtime)
+        return runtime
+      }
+
+      setDeepAgentRuntime(null)
+      if (response.data?.msg) {
+        message.error(response.data.msg)
+      }
+      return null
+    } catch (error) {
+      console.error('Load deep agent runtime error:', error)
+      setDeepAgentRuntime(null)
+      return null
+    } finally {
+      setDeepAgentRuntimeLoading(false)
+    }
+  }, [deepAgentEnabled, message])
+
+  useEffect(() => {
+    if (agentMode !== AGENT_MODES.DEEP || !deepAgentEnabled) {
+      return
+    }
+    void loadDeepAgentRuntime()
+  }, [agentMode, deepAgentEnabled, loadDeepAgentRuntime])
+
+  const mutateDeepAgentRuntime = useCallback(async (endpoint, successText) => {
+    if (!deepAgentEnabled) {
+      message.warning('DeepAgent 功能未启用')
+      return
+    }
+
+    setDeepAgentRuntimeLoading(true)
+    try {
+      const response = await api.post(endpoint)
+      if (response.data?.code === STATUS_CODES.SUCCESS) {
+        setDeepAgentRuntime(response.data?.data?.runtime || null)
+        if (successText) {
+          message.success(successText)
+        }
+        return
+      }
+
+      message.error(response.data?.msg || '操作失败')
+      if (response.data?.data?.runtime) {
+        setDeepAgentRuntime(response.data.data.runtime)
+      }
+    } catch (error) {
+      console.error('Mutate deep agent runtime error:', error)
+      message.error('操作失败，请稍后重试')
+    } finally {
+      setDeepAgentRuntimeLoading(false)
+    }
+  }, [deepAgentEnabled, message])
+
+  const refreshDeepAgentRuntime = useCallback(async () => {
+    await loadDeepAgentRuntime()
+  }, [loadDeepAgentRuntime])
+
+  const restartDeepAgentRuntime = useCallback(async () => {
+    await mutateDeepAgentRuntime(API_ENDPOINTS.DEEP_AGENT_RUNTIME_RESTART, '容器已重启')
+  }, [mutateDeepAgentRuntime])
+
+  const rebuildDeepAgentRuntime = useCallback(async () => {
+    await mutateDeepAgentRuntime(API_ENDPOINTS.DEEP_AGENT_RUNTIME_REBUILD, '工作区已重建')
+  }, [mutateDeepAgentRuntime])
 
   useEffect(() => {
     loadSessions()
@@ -607,8 +695,16 @@ const useChat = () => {
   const buildChatRunOptions = useCallback(() => ({
     enabledToolAPINames: normalizeEnabledToolAPINames(enabledToolAPINames),
     enabledMCPServerIDs: normalizeEnabledToolAPINames(enabledMCPServerIDs),
+    agentMode,
     thinkingModeEnabled: thinkingMode
-  }), [enabledMCPServerIDs, enabledToolAPINames, thinkingMode])
+  }), [agentMode, enabledMCPServerIDs, enabledToolAPINames, thinkingMode])
+
+  const resolveAgentEndpoint = useCallback((runOptions, isStream) => {
+    if (runOptions.agentMode === AGENT_MODES.DEEP) {
+      return isStream ? API_ENDPOINTS.DEEP_AGENT_STREAM : API_ENDPOINTS.DEEP_AGENT_GENERATE
+    }
+    return isStream ? API_ENDPOINTS.AGENT_STREAM : API_ENDPOINTS.AGENT_GENERATE
+  }, [])
 
   const buildChatRequest = useCallback((question, runOptions, sessionIdOverride = null) => {
     const payload = {
@@ -626,7 +722,7 @@ const useChat = () => {
   }, [activeKey, isTempSession])
 
   const sendStreamMessage = useCallback(async (question, runOptions) => {
-    const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
+    const url = `${API_BASE_URL}/${resolveAgentEndpoint(runOptions, true)}`
     let didCreateSession = false
     let activeMessageKey = null
     let activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
@@ -1133,14 +1229,17 @@ const useChat = () => {
       if (didCreateSession) {
         loadSessions()
       }
+      if (runOptions.agentMode === AGENT_MODES.DEEP) {
+        void loadDeepAgentRuntime()
+      }
     }
-  }, [activeKey, buildChatRequest, createServerSession, isTempSession, loadSessions, message])
+  }, [activeKey, buildChatRequest, createServerSession, isTempSession, loadDeepAgentRuntime, loadSessions, message, resolveAgentEndpoint])
 
   const sendGenerateMessage = useCallback(async (question, runOptions) => {
     const payload = buildChatRequest(question, runOptions)
     const hasEnabledTools = runOptions.enabledToolAPINames.length > 0 || runOptions.enabledMCPServerIDs.length > 0
     try {
-      const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
+      const response = await api.post(resolveAgentEndpoint(runOptions, false), payload)
 
       if (response.data?.code === STATUS_CODES.SUCCESS) {
         const data = response.data?.data || {}
@@ -1183,9 +1282,12 @@ const useChat = () => {
       console.error('Send message error:', err)
       message.error('发送失败，请重试')
     } finally {
+      if (runOptions.agentMode === AGENT_MODES.DEEP) {
+        void loadDeepAgentRuntime()
+      }
       setIsLoading(false)
     }
-  }, [activeKey, bindServerSession, buildChatRequest, isTempSession, loadMessages, message])
+  }, [activeKey, bindServerSession, buildChatRequest, isTempSession, loadDeepAgentRuntime, loadMessages, message, resolveAgentEndpoint])
 
   const handleAttachmentUpload = useCallback(async (file) => {
     const formData = new FormData()
@@ -1326,10 +1428,14 @@ const useChat = () => {
     availableTools,
     availableMCPServers,
     mcpFeatureEnabled,
+    deepAgentEnabled,
     enabledToolAPINames,
     enabledMCPServerIDs,
+    agentMode,
     thinkingMode,
     isStreaming,
+    deepAgentRuntime,
+    deepAgentRuntimeLoading,
     currentPage,
     inputValue,
     isLoading,
@@ -1348,6 +1454,10 @@ const useChat = () => {
     setEditTitle,
     handleSend,
     handleActionClick,
+    refreshDeepAgentRuntime,
+    restartDeepAgentRuntime,
+    rebuildDeepAgentRuntime,
+    setAgentMode,
     setEnabledToolAPINames,
     setEnabledMCPServerIDs,
     setThinkingMode,

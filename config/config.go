@@ -81,6 +81,18 @@ type MCPConfig struct {
 	SecretKey string
 }
 
+type DeepAgentConfig struct {
+	Enabled            bool
+	Image              string
+	WorkspaceRoot      string
+	TemplateDir        string
+	ContainerWorkdir   string
+	IdleTTLMinutes     int
+	MaxIterations      int
+	DockerHost         string
+	ReaperIntervalSecs int
+}
+
 type Config struct {
 	EmailConfig
 	RedisConfig
@@ -93,6 +105,7 @@ type Config struct {
 	OpenAIConfig
 	MinioConfig
 	MCPConfig
+	DeepAgentConfig
 }
 
 type RedisKeyConfig struct {
@@ -196,6 +209,17 @@ func InitConfig() error {
 		},
 		MCPConfig: MCPConfig{
 			SecretKey: getEnv("MCP_SECRET_KEY", ""),
+		},
+		DeepAgentConfig: DeepAgentConfig{
+			Enabled:            getEnv("DEEP_AGENT_ENABLED", "false") == "true",
+			Image:              getEnv("DEEP_AGENT_IMAGE", "gopherai/deep-agent:latest"),
+			WorkspaceRoot:      getEnv("DEEP_AGENT_WORKSPACE_ROOT", "./runtime/deepagent"),
+			TemplateDir:        getEnv("DEEP_AGENT_TEMPLATE_DIR", "."),
+			ContainerWorkdir:   getEnv("DEEP_AGENT_CONTAINER_WORKDIR", "/workspace"),
+			IdleTTLMinutes:     getEnvInt("DEEP_AGENT_IDLE_TTL_MINUTES", 30),
+			MaxIterations:      getEnvInt("DEEP_AGENT_MAX_ITERATIONS", 20),
+			DockerHost:         getEnv("DEEP_AGENT_DOCKER_HOST", ""),
+			ReaperIntervalSecs: getEnvInt("DEEP_AGENT_REAPER_INTERVAL_SECS", 60),
 		},
 	}
 

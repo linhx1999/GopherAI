@@ -7,29 +7,32 @@ type Code int64
 const (
 	CodeSuccess Code = 1000
 
-	CodeInvalidParams      Code = 2001
-	CodeUserExist          Code = 2002
-	CodeUserNotExist       Code = 2003
-	CodeInvalidPassword    Code = 2004
-	CodeNotMatchPassword   Code = 2005
-	CodeInvalidToken       Code = 2006
-	CodeNotLogin           Code = 2007
-	CodeInvalidCaptcha     Code = 2008
-	CodeRecordNotFound     Code = 2009
-	CodeIllegalPassword    Code = 2010
-	CodeSessionNotFound    Code = 2011
-	CodeInvalidIndex       Code = 2012
-	CodeMCPServerNotFound  Code = 2013
-	CodeMCPFeatureDisabled Code = 2014
+	CodeInvalidParams            Code = 2001
+	CodeUserExist                Code = 2002
+	CodeUserNotExist             Code = 2003
+	CodeInvalidPassword          Code = 2004
+	CodeNotMatchPassword         Code = 2005
+	CodeInvalidToken             Code = 2006
+	CodeNotLogin                 Code = 2007
+	CodeInvalidCaptcha           Code = 2008
+	CodeRecordNotFound           Code = 2009
+	CodeIllegalPassword          Code = 2010
+	CodeSessionNotFound          Code = 2011
+	CodeInvalidIndex             Code = 2012
+	CodeMCPServerNotFound        Code = 2013
+	CodeMCPFeatureDisabled       Code = 2014
+	CodeDeepAgentFeatureDisabled Code = 2015
+	CodeDeepAgentRuntimeBusy     Code = 2016
 
 	CodeForbidden Code = 3001
 
 	CodeServerBusy Code = 4001
 
-	AIModelNotFind          Code = 5001
-	AIModelCannotOpen       Code = 5002
-	AIModelFail             Code = 5003
-	CodeMCPConnectionFailed Code = 5004
+	AIModelNotFind               Code = 5001
+	AIModelCannotOpen            Code = 5002
+	AIModelFail                  Code = 5003
+	CodeMCPConnectionFailed      Code = 5004
+	CodeDeepAgentContainerFailed Code = 5005
 
 	TTSFail Code = 6001
 )
@@ -37,30 +40,33 @@ const (
 var msg = map[Code]string{
 	CodeSuccess: "success",
 
-	CodeInvalidParams:      "请求参数错误",
-	CodeUserExist:          "用户名已存在",
-	CodeUserNotExist:       "用户不存在",
-	CodeInvalidPassword:    "用户名或密码错误",
-	CodeNotMatchPassword:   "两次密码不一致",
-	CodeInvalidToken:       "无效的Token",
-	CodeNotLogin:           "用户未登录",
-	CodeInvalidCaptcha:     "验证码错误",
-	CodeRecordNotFound:     "记录不存在",
-	CodeIllegalPassword:    "密码不合法",
-	CodeSessionNotFound:    "会话不存在",
-	CodeInvalidIndex:       "索引超出范围",
-	CodeMCPServerNotFound:  "MCP 服务不存在",
-	CodeMCPFeatureDisabled: "MCP 功能未启用",
+	CodeInvalidParams:            "请求参数错误",
+	CodeUserExist:                "用户名已存在",
+	CodeUserNotExist:             "用户不存在",
+	CodeInvalidPassword:          "用户名或密码错误",
+	CodeNotMatchPassword:         "两次密码不一致",
+	CodeInvalidToken:             "无效的Token",
+	CodeNotLogin:                 "用户未登录",
+	CodeInvalidCaptcha:           "验证码错误",
+	CodeRecordNotFound:           "记录不存在",
+	CodeIllegalPassword:          "密码不合法",
+	CodeSessionNotFound:          "会话不存在",
+	CodeInvalidIndex:             "索引超出范围",
+	CodeMCPServerNotFound:        "MCP 服务不存在",
+	CodeMCPFeatureDisabled:       "MCP 功能未启用",
+	CodeDeepAgentFeatureDisabled: "DeepAgent 功能未启用",
+	CodeDeepAgentRuntimeBusy:     "DeepAgent 运行时忙碌",
 
 	CodeForbidden: "权限不足",
 
 	CodeServerBusy: "服务繁忙",
 
-	AIModelNotFind:          "模型不存在",
-	AIModelCannotOpen:       "无法打开模型",
-	AIModelFail:             "模型运行失败",
-	CodeMCPConnectionFailed: "MCP 服务连接失败",
-	TTSFail:                 "语音服务失败",
+	AIModelNotFind:               "模型不存在",
+	AIModelCannotOpen:            "无法打开模型",
+	AIModelFail:                  "模型运行失败",
+	CodeMCPConnectionFailed:      "MCP 服务连接失败",
+	CodeDeepAgentContainerFailed: "DeepAgent 容器运行失败",
+	TTSFail:                      "语音服务失败",
 }
 
 func (code Code) Code() int64 {

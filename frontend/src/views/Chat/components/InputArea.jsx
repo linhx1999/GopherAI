@@ -1,15 +1,19 @@
 import { useRef, useMemo } from 'react'
-import { Button, Checkbox, Dropdown, Flex } from 'antd'
+import { Button, Checkbox, Dropdown, Flex, Segmented, Space, Tag, Tooltip } from 'antd'
 import {
   ApiOutlined,
   CloudUploadOutlined,
+  DeploymentUnitOutlined,
   LinkOutlined,
+  ReloadOutlined,
   ToolOutlined,
   ThunderboltOutlined,
   SearchOutlined,
-  BulbOutlined
+  BulbOutlined,
+  SyncOutlined
 } from '@ant-design/icons'
 import { Sender, Attachments } from '@ant-design/x'
+import { AGENT_MODES } from '../config/constants'
 
 const Switch = Sender.Switch
 
@@ -23,6 +27,14 @@ const resolveToolIcon = (tool) => {
   return ToolOutlined
 }
 
+const RUNTIME_STATUS_META = {
+  stopped: { color: 'default', label: '已停止' },
+  starting: { color: 'processing', label: '启动中' },
+  running: { color: 'success', label: '运行中' },
+  error: { color: 'error', label: '异常' },
+  rebuilding: { color: 'warning', label: '重建中' }
+}
+
 /**
  * 输入区域组件（含工具选择和附件）
  */
@@ -31,22 +43,32 @@ const InputArea = ({
   isLoading,
   availableTools,
   availableMCPServers,
+  deepAgentEnabled,
   enabledToolApiNames,
   enabledMCPServerIDs,
+  agentMode,
   thinkingMode,
   isStreaming,
+  deepAgentRuntime,
+  deepAgentRuntimeLoading,
   attachments,
   attachmentsOpen,
   onInputChange,
   onSubmit,
+  onAgentModeChange,
   onEnabledToolApiNamesChange,
   onEnabledMCPServerIDsChange,
   onThinkingModeChange,
   onStreamingChange,
+  onDeepAgentRuntimeRefresh,
+  onDeepAgentRuntimeRestart,
+  onDeepAgentRuntimeRebuild,
   onAttachmentsChange,
   onAttachmentsOpenChange
 }) => {
   const senderRef = useRef(null)
+  const runtimeMeta = RUNTIME_STATUS_META[deepAgentRuntime?.status] || RUNTIME_STATUS_META.stopped
+  const isDeepMode = agentMode === AGENT_MODES.DEEP
 
   const isServerSelectable = (server) => (
     server?.lastTestStatus === 'success' && Array.isArray(server?.tools) && server.tools.length > 0
@@ -128,6 +150,23 @@ const InputArea = ({
           <Flex justify="space-between" align="center">
             {/* 左侧控制区 */}
             <Flex gap="small" align="center">
+              <Segmented
+                size="small"
+                value={agentMode}
+                onChange={onAgentModeChange}
+                options={[
+                  {
+                    label: <Space size={4}><ToolOutlined />普通聊天</Space>,
+                    value: AGENT_MODES.CHAT
+                  },
+                  {
+                    label: <Space size={4}><DeploymentUnitOutlined />DeepAgent</Space>,
+                    value: AGENT_MODES.DEEP,
+                    disabled: !deepAgentEnabled
+                  }
+                ]}
+              />
+
               {/* 附件按钮 */}
               <Button
                 type="text"
@@ -253,6 +292,53 @@ const InputArea = ({
           </Flex>
         )}
       />
+
+      {isDeepMode ? (
+        <div style={{
+          marginTop: 8,
+          padding: '10px 12px',
+          borderRadius: 12,
+          background: '#f7f8fa',
+          border: '1px solid #eef1f5'
+        }}>
+          <Flex justify="space-between" align="center" gap={12} wrap>
+            <Space size="small" wrap>
+              <Tag color={runtimeMeta.color}>{runtimeMeta.label}</Tag>
+              <span style={{ color: '#666', fontSize: 12 }}>
+                {deepAgentRuntime?.lastError || '每个用户复用一个独立容器与工作区副本'}
+              </span>
+            </Space>
+
+            <Space size="small" wrap>
+              <Tooltip title="刷新运行时状态">
+                <Button
+                  size="small"
+                  icon={<SyncOutlined spin={deepAgentRuntimeLoading} />}
+                  onClick={onDeepAgentRuntimeRefresh}
+                  disabled={deepAgentRuntimeLoading}
+                >
+                  刷新
+                </Button>
+              </Tooltip>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={onDeepAgentRuntimeRestart}
+                disabled={deepAgentRuntimeLoading}
+              >
+                重启容器
+              </Button>
+              <Button
+                size="small"
+                onClick={onDeepAgentRuntimeRebuild}
+                disabled={deepAgentRuntimeLoading}
+              >
+                重建工作区
+              </Button>
+            </Space>
+          </Flex>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -63,6 +63,7 @@ const useToolCatalog = () => {
   const [availableTools, setAvailableTools] = useState([])
   const [availableMCPServers, setAvailableMCPServers] = useState([])
   const [mcpFeatureEnabled, setMCPFeatureEnabled] = useState(false)
+  const [deepAgentEnabled, setDeepAgentEnabled] = useState(false)
 
   const loadToolCatalog = useCallback(async () => {
     try {
@@ -71,17 +72,20 @@ const useToolCatalog = () => {
         setAvailableTools(parseToolCatalogResponse(response.data))
         setAvailableMCPServers(parseMCPServerCatalogResponse(response.data))
         setMCPFeatureEnabled(Boolean(response.data?.data?.mcp_feature_enabled))
+        setDeepAgentEnabled(Boolean(response.data?.data?.deep_agent_enabled))
         return
       }
 
       setAvailableTools([])
       setAvailableMCPServers([])
       setMCPFeatureEnabled(false)
+      setDeepAgentEnabled(false)
     } catch (error) {
       console.error('Load tool catalog error:', error)
       setAvailableTools([])
       setAvailableMCPServers([])
       setMCPFeatureEnabled(false)
+      setDeepAgentEnabled(false)
     }
   }, [])
 
@@ -95,6 +99,7 @@ const useToolCatalog = () => {
     availableTools,
     availableMCPServers,
     mcpFeatureEnabled,
+    deepAgentEnabled,
     reloadToolCatalog: loadToolCatalog
   }
 }

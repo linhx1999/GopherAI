@@ -1,6 +1,6 @@
 # GopherAI
 
-一个基于 Go 的 AI 助手平台，支持多模型对话、SSE 流式回复、RAG 知识库检索、文件管理和用户自定义 MCP 工具接入。
+一个基于 Go 的 AI 助手平台，支持多模型对话、SSE 流式回复、DeepAgent、RAG 知识库检索、文件管理和用户自定义 MCP 工具接入。
 
 ## 功能特性
 
@@ -8,6 +8,7 @@
 - 流式响应：SSE 实时输出，历史消息直接完整回放
 - 思考模式：聊天页默认开启思考模式，assistant 的思考和工具过程统一使用 `ThoughtChain` 展示；最终回答正文仍保留独立 bubble，流式按 `response.message.completed` 收口消息边界
 - 显式工具启用：仅本轮勾选的工具参与执行，不再隐式启用默认工具
+- DeepAgent：支持在聊天页切换到 DeepAgent 模式，走独立 `/api/v1/deep-agent/*` 接口，并为每个用户按需启动独立 Docker 容器
 - 自定义 MCP：支持按用户配置远程 SSE / HTTP MCP 服务，在聊天页按“服务”整体启用
 - RAG 知识库：支持文档上传、切分、向量索引、按文件检索
 - 文件管理：上传、下载、索引、删索引、删除文件
@@ -45,6 +46,9 @@ cp .env.example .env
 # 2. 启动依赖服务
 docker compose up -d
 
+# 2.1 构建 DeepAgent 运行镜像（启用 DeepAgent 时需要）
+docker build -t gopherai/deep-agent:latest -f docker/deepagent/Dockerfile .
+
 # 3. 启动后端
 go mod download
 go run main.go
@@ -62,7 +66,8 @@ pnpm dev
 ## 关键约定
 
 - `POST /api/v1/agent/*` 的 `tools` 表示“本次请求显式启用的内置工具 API 名称列表”
-- `POST /api/v1/agent/*` 新增 `mcp_server_ids`，表示“本次请求整体启用的 MCP 服务 ID 列表”
+- `POST /api/v1/agent/*` 与 `POST /api/v1/deep-agent/*` 都支持 `mcp_server_ids`，表示“本次请求整体启用的 MCP 服务 ID 列表”
+- DeepAgent 走独立接口 `/api/v1/deep-agent/generate` 与 `/api/v1/deep-agent/stream`；现有 `/api/v1/agent/*` 保持普通聊天链路不变
 - SSE 每一帧统一输出 `{ type, code, message, response }` envelope
 - 流式事件固定使用 `response.created` / `response.message.delta` / `response.message.completed` / `response.error` / `response.done`
 - 历史消息接口返回 `{ message_id, index, message, created_at }`，其中 `message` 为完整 `schema.Message`
@@ -71,8 +76,10 @@ pnpm dev
 - 持久化模型统一采用“`gorm.Model` + 业务 UUID”双标识；数据库内部关联走数值 ID，对外接口统一使用业务 UUID
 - Session 模型不持久化工具列表；工具启用状态仅来自当前请求的 `tools` 和 `mcp_server_ids`
 - `GET /api/v1/tools` 同时返回内置工具目录和当前用户的 `mcp_servers` 摘要；内置工具仍保持 `name`、`display_name`、`description`
+- `GET /api/v1/tools` 额外返回 `deep_agent_enabled`，用于前端决定是否展示 DeepAgent 模式入口
 - 后端工具按工具名拆分到 `common/agent/tools/*.go`；目录下除工具文件外，仅保留 `manager.go` 与 `interface.go` 两个收口文件，`ResolveRequestedTools` 会按请求中的工具名直接解析 `[]tool.BaseTool`
 - 自定义 MCP 连接逻辑集中在 `common/mcp/`：负责请求头加密解密、按 `transport_type` 初始化 SSE 或 streamable HTTP client，并通过 Eino MCP 适配层拉取远程工具
+- DeepAgent 运行时集中在 `common/deepagent/`：负责用户私有工作区副本、Docker 容器生命周期、根目录受限文件工具和容器内命令执行
 - 生成与流式执行共享同一套准备逻辑，服务端按请求参数直接装配 agent 与执行上下文，不再额外包装内部请求对象
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequentialthinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
 - `sequentialthinking` 在 `common/agent/tools/sequential_thinking.go` 中维护单一工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`ResolveRequestedTools` 会为每次请求创建独立实例，避免跨请求共享思维链状态
@@ -80,6 +87,7 @@ pnpm dev
 - `POST /api/v1/agent/*` 收到未知工具名时会直接返回请求参数错误，且不会创建会话、写入消息或触发模型调用
 - MCP 服务配置按用户维度保存在数据库；聊天时只按请求中的 `mcp_server_ids` 临时建立连接，不写入 Session
 - 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
+- DeepAgent 执行层基于 Eino ADK `deep.New(...)`；同一用户所有会话共享一个容器和一份工作区副本，但运行时请求串行
 - 流式首轮对话改为“先 `POST /api/v1/sessions` 创建会话，再 `POST /api/v1/agent/stream` 拉取智能体输出”；`/agent/stream` 必须携带已有 `session_id`
 - 流式 SSE 不再暴露 `message_index`；前端仅按事件顺序消费 `response.*` envelope
 - 聊天页前端默认使用流式输出和思考模式；用户仍可通过输入区开关临时切换为非流式或关闭思考模式
@@ -139,6 +147,11 @@ data: {"type":"response.done","code":1000,"message":"success","response":null}
 |------|------|------|
 | POST | `/api/v1/agent/generate` | 非流式对话 |
 | POST | `/api/v1/agent/stream` | SSE 流式对话 |
+| POST | `/api/v1/deep-agent/generate` | DeepAgent 非流式对话 |
+| POST | `/api/v1/deep-agent/stream` | DeepAgent SSE 流式对话 |
+| GET | `/api/v1/deep-agent/runtime` | DeepAgent 运行时状态 |
+| POST | `/api/v1/deep-agent/runtime/restart` | 重启 DeepAgent 容器 |
+| POST | `/api/v1/deep-agent/runtime/rebuild` | 重建 DeepAgent 工作区与容器 |
 | GET | `/api/v1/agent/:session_id/messages` | 会话消息 |
 | GET | `/api/v1/tools` | 工具列表 |
 | GET | `/api/v1/mcp/servers` | MCP 服务列表 |
@@ -175,6 +188,7 @@ data: {"type":"response.done","code":1000,"message":"success","response":null}
 | MinIO | `MINIO_ENDPOINT` `MINIO_ACCESS_KEY` `MINIO_SECRET_KEY` `MINIO_BUCKET` `MINIO_USE_SSL` |
 | TTS | `VOICE_API_KEY` `VOICE_SECRET_KEY` |
 | MCP | `MCP_SECRET_KEY` |
+| DeepAgent | `DEEP_AGENT_ENABLED` `DEEP_AGENT_IMAGE` `DEEP_AGENT_WORKSPACE_ROOT` `DEEP_AGENT_TEMPLATE_DIR` `DEEP_AGENT_CONTAINER_WORKDIR` `DEEP_AGENT_IDLE_TTL_MINUTES` `DEEP_AGENT_MAX_ITERATIONS` `DEEP_AGENT_DOCKER_HOST` `DEEP_AGENT_REAPER_INTERVAL_SECS` |
 
 ## 项目结构
 

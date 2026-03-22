@@ -16,7 +16,9 @@ import (
 	agentcommon "GopherAI/common/agent"
 	agenttools "GopherAI/common/agent/tools"
 	"GopherAI/common/code"
+	commondeep "GopherAI/common/deepagent"
 	"GopherAI/common/rabbitmq"
+	"GopherAI/config"
 	messageDAO "GopherAI/dao/message"
 	sessionDAO "GopherAI/dao/session"
 	"GopherAI/model"
@@ -26,6 +28,11 @@ import (
 const baseSystemPrompt = `你是一个智能助手，可以帮助用户解答各种问题。
 
 请用中文回答，保持回答简洁、准确、友好。`
+
+const deepAgentSystemPrompt = `你当前运行在 GopherAI 的 DeepAgent 模式。
+
+请默认使用中文回复用户，最终结论保持简洁、准确、友好。
+如果启用了知识检索工具，请在回答中标注信息来源。`
 
 const (
 	StreamEventTypeResponseCreated          = "response.created"
@@ -71,6 +78,13 @@ type preparedChatExecution struct {
 	agent                      adk.Agent
 	cleanup                    func()
 }
+
+type executionMode string
+
+const (
+	executionModeChat executionMode = "chat"
+	executionModeDeep executionMode = "deep"
+)
 
 type StreamDeltaResponse struct {
 	Delta *schema.Message `json:"delta"`
@@ -175,6 +189,13 @@ func buildConversationMessages(history []*model.Message, userMessage *schema.Mes
 		messages = append(messages, userMessage)
 	}
 
+	return messages
+}
+
+func buildDeepConversationMessages(history []*model.Message, userMessage *schema.Message) []*schema.Message {
+	messages := make([]*schema.Message, 0, len(history)+2)
+	messages = append(messages, schema.SystemMessage(deepAgentSystemPrompt))
+	messages = append(messages, buildConversationMessages(history, userMessage)...)
 	return messages
 }
 
@@ -316,6 +337,7 @@ func prepareChatExecution(
 	mcpServerIDs []string,
 	thinkingMode bool,
 	allowCreateSession bool,
+	mode executionMode,
 ) (*preparedChatExecution, code.Code) {
 	resolvedTools, err := agenttools.ResolveRequestedTools(ctx, enabledToolNames)
 	if err != nil {
@@ -331,10 +353,18 @@ func prepareChatExecution(
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
+	cleanupFns := make([]func(), 0, 2)
+	if cleanup != nil {
+		cleanupFns = append(cleanupFns, cleanup)
+	}
 	shouldCleanup := true
 	defer func() {
-		if shouldCleanup && cleanup != nil {
-			cleanup()
+		if shouldCleanup {
+			for i := len(cleanupFns) - 1; i >= 0; i-- {
+				if cleanupFns[i] != nil {
+					cleanupFns[i]()
+				}
+			}
 		}
 	}()
 
@@ -344,19 +374,66 @@ func prepareChatExecution(
 		Tools: resolvedTools,
 	}
 	hasEnabledTools := len(resolvedTools) > 0
-	agent, err := agentcommon.GetAgentManager().CreateAgentForChat(
-		ctx,
-		toolsNodeConfig,
-		thinkingMode,
-		buildAgentInstruction(hasEnabledTools),
+
+	var (
+		agent        adk.Agent
+		conversation []*schema.Message
 	)
-	if err != nil {
-		if agenttools.IsUnknownToolError(err) {
-			log.Println("prepareChatExecution CreateAgentForChat invalid tools:", err)
-			return nil, code.CodeInvalidParams
+
+	switch mode {
+	case executionModeDeep:
+		if !commondeep.FeatureEnabled() {
+			return nil, code.CodeDeepAgentFeatureDisabled
 		}
-		log.Println("prepareChatExecution CreateAgentForChat error:", err)
-		return nil, code.AIModelFail
+
+		runtimeManager, managerErr := commondeep.GetRuntimeManager()
+		if managerErr != nil {
+			log.Println("prepareChatExecution GetRuntimeManager error:", managerErr)
+			return nil, code.CodeDeepAgentContainerFailed
+		}
+
+		releaseExecution, lockErr := runtimeManager.AcquireExecution(userRefID)
+		if lockErr != nil {
+			log.Println("prepareChatExecution AcquireExecution error:", lockErr)
+			return nil, code.CodeDeepAgentRuntimeBusy
+		}
+		cleanupFns = append(cleanupFns, releaseExecution)
+
+		handle, handleErr := runtimeManager.BuildHandle(ctx, userRefID)
+		if handleErr != nil {
+			log.Println("prepareChatExecution BuildHandle error:", handleErr)
+			return nil, code.CodeDeepAgentContainerFailed
+		}
+
+		agent, err = agentcommon.GetAgentManager().CreateAgentForDeep(
+			ctx,
+			toolsNodeConfig,
+			thinkingMode,
+			handle.Backend,
+			handle.Shell,
+			config.GetConfig().DeepAgentConfig.MaxIterations,
+		)
+		if err != nil {
+			log.Println("prepareChatExecution CreateAgentForDeep error:", err)
+			return nil, code.AIModelFail
+		}
+	case executionModeChat:
+		agent, err = agentcommon.GetAgentManager().CreateAgentForChat(
+			ctx,
+			toolsNodeConfig,
+			thinkingMode,
+			buildAgentInstruction(hasEnabledTools),
+		)
+		if err != nil {
+			if agenttools.IsUnknownToolError(err) {
+				log.Println("prepareChatExecution CreateAgentForChat invalid tools:", err)
+				return nil, code.CodeInvalidParams
+			}
+			log.Println("prepareChatExecution CreateAgentForChat error:", err)
+			return nil, code.AIModelFail
+		}
+	default:
+		return nil, code.CodeInvalidParams
 	}
 
 	session, code_ := resolveExecutionSession(userRefID, sessionID, userMessage, allowCreateSession)
@@ -376,21 +453,32 @@ func prepareChatExecution(
 	userMessageIndex := len(history)
 	userMessageSchema := schema.UserMessage(userMessage)
 	persistMessage(session.SessionID, buildStoredMessage(session, userRefID, userMessageIndex, userMessageSchema))
+	if mode == executionModeDeep {
+		conversation = buildDeepConversationMessages(history, userMessageSchema)
+	} else {
+		conversation = buildConversationMessages(history, userMessageSchema)
+	}
 	shouldCleanup = false
 
 	return &preparedChatExecution{
 		session:                    session,
 		userRefID:                  userRefID,
-		conversation:               buildConversationMessages(history, userMessageSchema),
+		conversation:               conversation,
 		firstAssistantMessageIndex: userMessageIndex + 1,
 		agent:                      agent,
-		cleanup:                    cleanup,
+		cleanup: func() {
+			for i := len(cleanupFns) - 1; i >= 0; i-- {
+				if cleanupFns[i] != nil {
+					cleanupFns[i]()
+				}
+			}
+		},
 	}, code.CodeSuccess
 }
 
 // Generate 同步生成响应。
 func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true)
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true, executionModeChat)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -431,9 +519,51 @@ func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string
 	}, code.CodeSuccess
 }
 
+func DeepGenerate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*GenerateResult, code.Code) {
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true, executionModeDeep)
+	if code_ != code.CodeSuccess {
+		return nil, code_
+	}
+	defer func() {
+		if run.cleanup != nil {
+			run.cleanup()
+		}
+	}()
+
+	produced, finalMessage, err := agentcommon.CollectAgentMessages(ctx, run.agent, run.conversation)
+	if err != nil {
+		if isRequestCanceled(ctx, err) {
+			log.Printf("DeepGenerate canceled: %v", err)
+			return nil, code.CodeServerBusy
+		}
+		log.Println("DeepGenerate error:", err)
+		return nil, code.AIModelFail
+	}
+	if len(produced) == 0 && finalMessage != nil {
+		produced = append(produced, finalMessage)
+	}
+
+	lastIndex := persistProducedMessages(run.session, run.userRefID, run.firstAssistantMessageIndex, produced)
+	if finalMessage == nil && len(produced) > 0 {
+		finalMessage = produced[len(produced)-1]
+	}
+	if finalMessage == nil {
+		finalMessage = &schema.Message{Role: schema.Assistant}
+	}
+	if lastIndex < run.firstAssistantMessageIndex {
+		lastIndex = run.firstAssistantMessageIndex - 1
+	}
+
+	return &GenerateResult{
+		SessionID:    run.session.SessionID,
+		MessageIndex: lastIndex,
+		Message:      finalMessage,
+	}, code.CodeSuccess
+}
+
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
 func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false)
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false, executionModeChat)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -469,6 +599,57 @@ func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, 
 				return
 			}
 			log.Println("Stream StreamAgentMessages error:", err)
+			_ = emitEvent(ctx, events, NewErrorEvent(code.AIModelFail, "agent stream failed"))
+			return
+		}
+
+		persistProducedMessages(run.session, run.userRefID, run.firstAssistantMessageIndex, produced)
+		_ = emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseDone, nil))
+	}()
+
+	return &StreamHandle{
+		SessionID: run.session.SessionID,
+		Events:    events,
+	}, code.CodeSuccess
+}
+
+func DeepStream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*StreamHandle, code.Code) {
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false, executionModeDeep)
+	if code_ != code.CodeSuccess {
+		return nil, code_
+	}
+
+	events := make(chan StreamEnvelope)
+	go func() {
+		defer close(events)
+		defer func() {
+			if run.cleanup != nil {
+				run.cleanup()
+			}
+		}()
+
+		if err := emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseCreated, nil)); err != nil {
+			return
+		}
+
+		produced, err := agentcommon.StreamAgentMessages(ctx, run.agent, run.conversation, &agentcommon.StreamMessageSink{
+			OnChunk: func(msg *schema.Message) error {
+				return emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseMessageDelta, &StreamDeltaResponse{
+					Delta: msg,
+				}))
+			},
+			OnComplete: func(msg *schema.Message) error {
+				return emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseMessageCompleted, &StreamCompletedResponse{
+					Message: msg,
+				}))
+			},
+		})
+		if err != nil {
+			if isRequestCanceled(ctx, err) {
+				log.Printf("DeepStream canceled: %v", err)
+				return
+			}
+			log.Println("DeepStream StreamAgentMessages error:", err)
 			_ = emitEvent(ctx, events, NewErrorEvent(code.AIModelFail, "agent stream failed"))
 			return
 		}

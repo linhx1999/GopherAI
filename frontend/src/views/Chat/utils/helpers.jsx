@@ -32,7 +32,15 @@ export const renderMarkdown = (content) => <XMarkdown content={content} />
 
 const DEFAULT_TOOL_DISPLAY_NAMES = {
   knowledge_search: '知识库检索',
-  sequentialthinking: '逐步思考'
+  sequentialthinking: '逐步思考',
+  write_todos: '待办列表',
+  task: '子任务代理',
+  read_file: '读取文件',
+  write_file: '写入文件',
+  edit_file: '编辑文件',
+  glob: '文件匹配',
+  grep: '内容搜索',
+  execute: '命令执行'
 }
 
 export const hasVisibleMessageText = (message = {}) => Boolean(

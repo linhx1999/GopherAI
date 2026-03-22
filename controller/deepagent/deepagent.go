@@ -1,4 +1,4 @@
-package agent
+package deepagent
 
 import (
 	"io"
@@ -6,27 +6,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"GopherAI/common/agent/tools"
 	"GopherAI/common/code"
 	"GopherAI/controller"
 	agentService "GopherAI/service/agent"
 	deepagentService "GopherAI/service/deepagent"
-	mcpService "GopherAI/service/mcp"
 )
 
 const ginSSEEventName = "message"
 
-// ChatRequest 表示生成类接口的共享请求体。
 type ChatRequest struct {
-	SessionID    string   `json:"session_id"`                 // 流式接口必填，非流式接口可选
-	Message      string   `json:"message" binding:"required"` // 必填，用户消息内容
-	Tools        []string `json:"tools"`                      // 可选，内置工具 API 调用名列表
-	MCPServerIDs []string `json:"mcp_server_ids"`             // 可选，MCP 服务 ID 列表
-	ThinkingMode bool     `json:"thinking_mode"`              // 可选，是否启用思考模型
+	SessionID    string   `json:"session_id"`
+	Message      string   `json:"message" binding:"required"`
+	Tools        []string `json:"tools"`
+	MCPServerIDs []string `json:"mcp_server_ids"`
+	ThinkingMode bool     `json:"thinking_mode"`
 }
 
-// GenerateHandler 处理非流式生成请求。
-// POST /api/v1/agent/generate
 func GenerateHandler(c *gin.Context) {
 	req, err := parseChatRequest(c)
 	if err != nil {
@@ -34,7 +29,7 @@ func GenerateHandler(c *gin.Context) {
 		return
 	}
 
-	result, code_ := agentService.Generate(
+	result, code_ := agentService.DeepGenerate(
 		c.Request.Context(),
 		c.GetUint("userID"),
 		req.SessionID,
@@ -61,8 +56,6 @@ func GenerateHandler(c *gin.Context) {
 	})
 }
 
-// StreamHandler 处理 SSE 流式生成请求。
-// POST /api/v1/agent/stream
 func StreamHandler(c *gin.Context) {
 	req, err := parseChatRequest(c)
 	setSSEHeaders(c)
@@ -75,7 +68,7 @@ func StreamHandler(c *gin.Context) {
 		return
 	}
 
-	stream, code_ := agentService.Stream(
+	stream, code_ := agentService.DeepStream(
 		c.Request.Context(),
 		c.GetUint("userID"),
 		req.SessionID,
@@ -92,13 +85,8 @@ func StreamHandler(c *gin.Context) {
 	streamSSE(c, stream.Events)
 }
 
-// GetMessages 获取消息列表
-// GET /api/v1/agent/:session_id/messages
-func GetMessages(c *gin.Context) {
-	sessionID := c.Param("session_id")
-	userID := c.GetUint("userID")
-
-	messages, code_ := agentService.ListHistoryMessages(sessionID, userID)
+func GetRuntime(c *gin.Context) {
+	runtime, code_ := deepagentService.GetRuntimeStatus(c.Request.Context(), c.GetUint("userID"))
 	if code_ != code.CodeSuccess {
 		writeCodeResponse(c, code_)
 		return
@@ -107,34 +95,26 @@ func GetMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
-		Data: gin.H{
-			"session_id": sessionID,
-			"messages":   messages,
-			"total":      len(messages),
-		},
+		Data: gin.H{"runtime": runtime},
 	})
 }
 
-// GetTools 获取可用工具列表
-// GET /api/v1/tools
-func GetTools(c *gin.Context) {
-	toolList := tools.ListAvailableTools()
-	mcpServers, featureEnabled, code_ := mcpService.ListToolCatalogServers(c.GetUint("userID"))
+func RestartRuntime(c *gin.Context) {
+	runtime, code_ := deepagentService.RestartRuntime(c.Request.Context(), c.GetUint("userID"))
 	if code_ != code.CodeSuccess {
-		writeCodeResponse(c, code_)
+		writeRuntimeResponse(c, code_, runtime)
 		return
 	}
+	writeRuntimeResponse(c, code.CodeSuccess, runtime)
+}
 
-	c.JSON(http.StatusOK, controller.Response{
-		Code: code.CodeSuccess,
-		Msg:  code.CodeSuccess.Msg(),
-		Data: gin.H{
-			"tools":               toolList,
-			"mcp_servers":         mcpServers,
-			"mcp_feature_enabled": featureEnabled,
-			"deep_agent_enabled":  deepagentService.FeatureEnabled(),
-		},
-	})
+func RebuildRuntime(c *gin.Context) {
+	runtime, code_ := deepagentService.RebuildRuntime(c.Request.Context(), c.GetUint("userID"))
+	if code_ != code.CodeSuccess {
+		writeRuntimeResponse(c, code_, runtime)
+		return
+	}
+	writeRuntimeResponse(c, code.CodeSuccess, runtime)
 }
 
 func parseChatRequest(c *gin.Context) (*ChatRequest, error) {
@@ -145,11 +125,19 @@ func parseChatRequest(c *gin.Context) (*ChatRequest, error) {
 	return req, nil
 }
 
-func writeCodeResponse(c *gin.Context, code code.Code) {
+func writeCodeResponse(c *gin.Context, code_ code.Code) {
 	c.JSON(http.StatusOK, controller.Response{
-		Code: code,
-		Msg:  code.Msg(),
+		Code: code_,
+		Msg:  code_.Msg(),
 		Data: gin.H{},
+	})
+}
+
+func writeRuntimeResponse(c *gin.Context, code_ code.Code, runtime *deepagentService.RuntimeStatus) {
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code_,
+		Msg:  code_.Msg(),
+		Data: gin.H{"runtime": runtime},
 	})
 }
 

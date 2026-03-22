@@ -72,6 +72,7 @@ func InitPostgres() error {
 		new(model.DocumentChunk),
 		new(model.Message),
 		new(model.MCPServer),
+		new(model.DeepAgentRuntime),
 	)
 }
 
@@ -132,12 +133,13 @@ func GetUserByUserID(userID string) (*model.User, error) {
 
 func resetLegacyTables() error {
 	tableColumns := map[string][]string{
-		"users":           {"id", "user_id", "username"},
-		"sessions":        {"id", "session_id", "user_ref_id"},
-		"files":           {"id", "file_id", "user_ref_id"},
-		"document_chunks": {"id", "chunk_id", "file_ref_id"},
-		"messages":        {"id", "message_id", "session_ref_id", "user_ref_id"},
-		"mcp_servers":     {"id", "mcp_server_id", "user_ref_id"},
+		"users":               {"id", "user_id", "username"},
+		"sessions":            {"id", "session_id", "user_ref_id"},
+		"files":               {"id", "file_id", "user_ref_id"},
+		"document_chunks":     {"id", "chunk_id", "file_ref_id"},
+		"messages":            {"id", "message_id", "session_ref_id", "user_ref_id"},
+		"mcp_servers":         {"id", "mcp_server_id", "user_ref_id"},
+		"deep_agent_runtimes": {"id", "deep_agent_runtime_id", "user_ref_id"},
 	}
 
 	for table, columns := range tableColumns {
@@ -157,7 +159,7 @@ func resetLegacyTables() error {
 }
 
 func dropIdentityTables() error {
-	tables := []string{"messages", "document_chunks", "files", "sessions", "users", "mcp_servers"}
+	tables := []string{"messages", "document_chunks", "files", "sessions", "users", "mcp_servers", "deep_agent_runtimes"}
 	for _, table := range tables {
 		if !DB.Migrator().HasTable(table) {
 			continue

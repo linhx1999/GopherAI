@@ -26,10 +26,14 @@ const Chat = () => {
     availableTools,
     availableMCPServers,
     mcpFeatureEnabled,
+    deepAgentEnabled,
     enabledToolAPINames,
     enabledMCPServerIDs,
+    agentMode,
     thinkingMode,
     isStreaming,
+    deepAgentRuntime,
+    deepAgentRuntimeLoading,
     currentPage,
     inputValue,
     isLoading,
@@ -51,7 +55,11 @@ const Chat = () => {
     handleActionClick,
     bubbleListRef,
     handleBubbleListScroll,
+    refreshDeepAgentRuntime,
+    restartDeepAgentRuntime,
+    rebuildDeepAgentRuntime,
     // 状态更新
+    setAgentMode,
     setEnabledToolAPINames,
     setEnabledMCPServerIDs,
     setThinkingMode,
@@ -101,18 +109,26 @@ const Chat = () => {
           isLoading={isLoading}
           availableTools={availableTools}
           availableMCPServers={mcpFeatureEnabled ? availableMCPServers : []}
+          deepAgentEnabled={deepAgentEnabled}
           enabledToolApiNames={enabledToolAPINames}
           enabledMCPServerIDs={enabledMCPServerIDs}
+          agentMode={agentMode}
           thinkingMode={thinkingMode}
           isStreaming={isStreaming}
+          deepAgentRuntime={deepAgentRuntime}
+          deepAgentRuntimeLoading={deepAgentRuntimeLoading}
           attachments={attachments}
           attachmentsOpen={attachmentsOpen}
           onInputChange={setInputValue}
           onSubmit={handleSend}
+          onAgentModeChange={setAgentMode}
           onEnabledToolApiNamesChange={setEnabledToolAPINames}
           onEnabledMCPServerIDsChange={setEnabledMCPServerIDs}
           onThinkingModeChange={setThinkingMode}
           onStreamingChange={setIsStreaming}
+          onDeepAgentRuntimeRefresh={refreshDeepAgentRuntime}
+          onDeepAgentRuntimeRestart={restartDeepAgentRuntime}
+          onDeepAgentRuntimeRebuild={rebuildDeepAgentRuntime}
           onAttachmentsChange={setAttachments}
           onAttachmentsOpenChange={setAttachmentsOpen}
         />

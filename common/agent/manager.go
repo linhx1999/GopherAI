@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/filesystem"
+	deepagent "github.com/cloudwego/eino/adk/prebuilt/deep"
 	eino_model "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 
@@ -26,6 +28,8 @@ type AgentSessionConfig struct {
 const (
 	chatAgentName        = "chat_agent"
 	chatAgentDescription = "单 Agent 聊天助手，负责普通问答、工具调用与知识检索。"
+	deepAgentName        = "deep_agent"
+	deepAgentDescription = "多步骤 DeepAgent，负责复杂任务编排、文件操作与命令执行。"
 )
 
 var (
@@ -86,6 +90,34 @@ func (m *AgentManager) buildAgent(ctx context.Context, config *AgentSessionConfi
 	return agent, nil
 }
 
+func (m *AgentManager) buildDeepAgent(
+	ctx context.Context,
+	config *AgentSessionConfig,
+	backend filesystem.Backend,
+	shell filesystem.Shell,
+	maxIterations int,
+) (adk.Agent, error) {
+	if config == nil || config.Model == nil {
+		return nil, fmt.Errorf("agent config not available")
+	}
+
+	log.Printf("Creating ADK deep agent with model=%s, tool_count=%d", config.ModelName, len(config.ToolsNodeConfig.Tools))
+
+	agent, err := deepagent.New(ctx, &deepagent.Config{
+		Name:         deepAgentName,
+		Description:  deepAgentDescription,
+		ChatModel:    config.Model,
+		ToolsConfig:  adk.ToolsConfig{ToolsNodeConfig: config.ToolsNodeConfig},
+		MaxIteration: maxIterations,
+		Backend:      backend,
+		Shell:        shell,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create adk deep agent failed: %w", err)
+	}
+	return agent, nil
+}
+
 // CreateAgentForChat 基于当前请求创建一个新的 ChatModelAgent。
 func (m *AgentManager) CreateAgentForChat(ctx context.Context, toolsNodeConfig compose.ToolsNodeConfig, thinkingMode bool, instruction string) (adk.Agent, error) {
 	config, err := m.resolveAgentSessionConfig(ctx, toolsNodeConfig, thinkingMode, instruction)
@@ -93,4 +125,19 @@ func (m *AgentManager) CreateAgentForChat(ctx context.Context, toolsNodeConfig c
 		return nil, err
 	}
 	return m.buildAgent(ctx, config)
+}
+
+func (m *AgentManager) CreateAgentForDeep(
+	ctx context.Context,
+	toolsNodeConfig compose.ToolsNodeConfig,
+	thinkingMode bool,
+	backend filesystem.Backend,
+	shell filesystem.Shell,
+	maxIterations int,
+) (adk.Agent, error) {
+	config, err := m.resolveAgentSessionConfig(ctx, toolsNodeConfig, thinkingMode, "")
+	if err != nil {
+		return nil, err
+	}
+	return m.buildDeepAgent(ctx, config, backend, shell, maxIterations)
 }
