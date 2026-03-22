@@ -61,9 +61,11 @@ func TestCollectStreamMessageConcatsChunksAndEmitsSyntheticFinish(t *testing.T) 
 	})
 
 	var emitted []*schema.Message
-	full, err := collectStreamMessage(reader, func(msg *schema.Message) error {
-		emitted = append(emitted, msg)
-		return nil
+	full, err := collectStreamMessage(reader, &StreamMessageSink{
+		OnChunk: func(msg *schema.Message) error {
+			emitted = append(emitted, msg)
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("collectStreamMessage returned error: %v", err)
@@ -100,11 +102,13 @@ func TestCollectStreamMessageKeepsExistingFinishReason(t *testing.T) {
 	})
 
 	var finishReasons []string
-	full, err := collectStreamMessage(reader, func(msg *schema.Message) error {
-		if msg.ResponseMeta != nil {
-			finishReasons = append(finishReasons, msg.ResponseMeta.FinishReason)
-		}
-		return nil
+	full, err := collectStreamMessage(reader, &StreamMessageSink{
+		OnChunk: func(msg *schema.Message) error {
+			if msg.ResponseMeta != nil {
+				finishReasons = append(finishReasons, msg.ResponseMeta.FinishReason)
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("collectStreamMessage returned error: %v", err)
@@ -123,8 +127,10 @@ func TestCollectStreamMessageStopsOnSinkError(t *testing.T) {
 	})
 
 	expectedErr := errors.New("sink failed")
-	_, err := collectStreamMessage(reader, func(msg *schema.Message) error {
-		return expectedErr
+	_, err := collectStreamMessage(reader, &StreamMessageSink{
+		OnChunk: func(msg *schema.Message) error {
+			return expectedErr
+		},
 	})
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected sink error, got %v", err)
@@ -190,9 +196,16 @@ func TestStreamAgentMessagesConcatsStreamingEvent(t *testing.T) {
 	}
 
 	var emitted []*schema.Message
-	produced, err := StreamAgentMessages(context.Background(), agent, nil, func(msg *schema.Message) error {
-		emitted = append(emitted, msg)
-		return nil
+	var completed []*schema.Message
+	produced, err := StreamAgentMessages(context.Background(), agent, nil, &StreamMessageSink{
+		OnChunk: func(msg *schema.Message) error {
+			emitted = append(emitted, msg)
+			return nil
+		},
+		OnComplete: func(msg *schema.Message) error {
+			completed = append(completed, msg)
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("StreamAgentMessages returned error: %v", err)
@@ -211,5 +224,11 @@ func TestStreamAgentMessagesConcatsStreamingEvent(t *testing.T) {
 	}
 	if emitted[2].ResponseMeta == nil || emitted[2].ResponseMeta.FinishReason != "stop" {
 		t.Fatalf("expected synthetic finish chunk, got %#v", emitted[2])
+	}
+	if len(completed) != 1 {
+		t.Fatalf("expected 1 completed message, got %d", len(completed))
+	}
+	if completed[0].Content != "答案" || completed[0].ReasoningContent != "先分析" {
+		t.Fatalf("unexpected completed message: %#v", completed[0])
 	}
 }

@@ -38,28 +38,17 @@ func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
 
-	streamSSE(c, oneShotSSEStream(agentService.StreamEvent{
-		Meta: &agentService.StreamMeta{
-			Type:         agentService.StreamPayloadTypeMeta,
-			MessageIndex: 1,
-		},
-	}))
+	streamSSE(c, oneShotSSEStream(agentService.NewSuccessEvent(agentService.StreamEventTypeResponseCreated, nil)))
 
 	body := recorder.Body.String()
 	if !strings.Contains(body, "event:message") {
 		t.Fatalf("expected gin SSE event line, got %q", body)
 	}
-	if !strings.Contains(body, `"type":"meta"`) {
-		t.Fatalf("expected meta payload, got %q", body)
+	if !strings.Contains(body, `"type":"response.created"`) {
+		t.Fatalf("expected created payload, got %q", body)
 	}
-	if strings.Contains(body, `"session_id":"sess_1"`) {
-		t.Fatalf("did not expect session_id in payload, got %q", body)
-	}
-	if !strings.Contains(body, `"message_index":1`) {
-		t.Fatalf("expected message_index in payload, got %q", body)
-	}
-	if !strings.Contains(body, "data:[DONE]") {
-		t.Fatalf("expected done marker, got %q", body)
+	if !strings.Contains(body, `"code":1000`) {
+		t.Fatalf("expected success code, got %q", body)
 	}
 }
 
@@ -70,15 +59,18 @@ func TestStreamLoopWritesSchemaMessagePayload(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/stream", nil)
 
-	streamSSE(c, oneShotSSEStream(agentService.StreamEvent{
-		Chunk: &schema.Message{
+	streamSSE(c, oneShotSSEStream(agentService.NewSuccessEvent(agentService.StreamEventTypeResponseMessageDelta, &agentService.StreamDeltaResponse{
+		Delta: &schema.Message{
 			Role:             schema.Assistant,
 			Content:          "答案",
 			ReasoningContent: "先想",
 		},
-	}))
+	})))
 
 	body := recorder.Body.String()
+	if !strings.Contains(body, `"type":"response.message.delta"`) {
+		t.Fatalf("expected delta type, got %q", body)
+	}
 	if !strings.Contains(body, `"role":"assistant"`) {
 		t.Fatalf("expected assistant payload, got %q", body)
 	}
@@ -98,14 +90,14 @@ func TestStreamHandlerReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	StreamHandler(c)
 
 	body := recorder.Body.String()
-	if !strings.Contains(body, `"type":"error"`) {
+	if !strings.Contains(body, `"type":"response.error"`) {
 		t.Fatalf("expected error payload, got %q", body)
 	}
 	if !strings.Contains(body, `"message":"Key: 'ChatRequest.Message' Error:Field validation for 'Message' failed on the 'required' tag"`) {
 		t.Fatalf("expected validation error message, got %q", body)
 	}
-	if !strings.Contains(body, "data:[DONE]") {
-		t.Fatalf("expected done marker, got %q", body)
+	if !strings.Contains(body, `"code":2001`) {
+		t.Fatalf("expected invalid params code, got %q", body)
 	}
 }
 
@@ -120,14 +112,14 @@ func TestStreamHandlerReturnsErrorEventWhenSessionIDMissing(t *testing.T) {
 	StreamHandler(c)
 
 	body := recorder.Body.String()
-	if !strings.Contains(body, `"type":"error"`) {
+	if !strings.Contains(body, `"type":"response.error"`) {
 		t.Fatalf("expected error payload, got %q", body)
 	}
 	if !strings.Contains(body, `"message":"session_id is required"`) {
 		t.Fatalf("expected session_id required message, got %q", body)
 	}
-	if !strings.Contains(body, "data:[DONE]") {
-		t.Fatalf("expected done marker, got %q", body)
+	if !strings.Contains(body, `"code":2001`) {
+		t.Fatalf("expected invalid params code, got %q", body)
 	}
 }
 
@@ -144,14 +136,14 @@ func TestErrorEventStreamCanBeConsumedByGinStream(t *testing.T) {
 	if !strings.Contains(body, "event:message") {
 		t.Fatalf("expected gin SSE event line, got %q", body)
 	}
-	if !strings.Contains(body, `"type":"error"`) {
+	if !strings.Contains(body, `"type":"response.error"`) {
 		t.Fatalf("expected error payload, got %q", body)
 	}
 	if !strings.Contains(body, `"message":"bad request"`) {
 		t.Fatalf("expected error message in payload, got %q", body)
 	}
-	if !strings.Contains(body, "data:[DONE]") {
-		t.Fatalf("expected done marker, got %q", body)
+	if !strings.Contains(body, `"code":2001`) {
+		t.Fatalf("expected invalid params code, got %q", body)
 	}
 }
 

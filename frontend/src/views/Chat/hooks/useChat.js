@@ -401,7 +401,6 @@ const useChat = () => {
   const sendStreamMessage = useCallback(async (question, runOptions) => {
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
     let didCreateSession = false
-    let nextMessageIndex = null
     let activeMessageKey = null
     let activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
     let activeToolTraceKey = null
@@ -423,7 +422,7 @@ const useChat = () => {
 
     const createAssistantRecord = (chunk) => {
       const record = createRecord({
-        index: nextMessageIndex,
+        index: null,
         message: mergeSchemaMessageChunk({}, chunk),
         pending: !isMessageFinished(chunk),
         renderMode: MESSAGE_RENDER_MODE.STREAM,
@@ -431,9 +430,6 @@ const useChat = () => {
         assistantRenderMode: ASSISTANT_DISPLAY_MODES.DEFAULT,
         enabledToolAPINames: runOptions.enabledToolAPINames
       })
-      if (nextMessageIndex !== null) {
-        nextMessageIndex += 1
-      }
       activeMessageKey = isMessageFinished(record.message) ? null : record.key
       activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
       activeToolTraceKey = null
@@ -545,7 +541,7 @@ const useChat = () => {
       })
 
       const record = createRecord({
-        index: nextMessageIndex,
+        index: null,
         message: { role: MESSAGE_ROLES.ASSISTANT, content: '', reasoning_content: '' },
         pending: true,
         renderMode: MESSAGE_RENDER_MODE.STREAM,
@@ -554,10 +550,6 @@ const useChat = () => {
         enabledToolAPINames: runOptions.enabledToolAPINames,
         toolTraceRecords: [traceRecord]
       })
-
-      if (nextMessageIndex !== null) {
-        nextMessageIndex += 1
-      }
 
       activeMessageKey = record.key
       activeRecordMode = ASSISTANT_DISPLAY_MODES.TOOL_CHAIN
@@ -664,28 +656,35 @@ const useChat = () => {
           const parsed = parseSSELine(line)
           if (!parsed) continue
 
-          if (parsed.type === 'done') {
-            finalizeStream()
-            continue
-          }
-
           if (parsed.type !== 'json') {
             continue
           }
 
-          const payload = parsed.data
-          if (payload?.type === SSE_EVENT_TYPES.META) {
-            if (typeof payload.message_index === 'number') {
-              nextMessageIndex = payload.message_index
-            }
+          const event = parsed.data
+          if (event?.type === SSE_EVENT_TYPES.RESPONSE_CREATED) {
             continue
           }
 
-          if (payload?.type === SSE_EVENT_TYPES.ERROR) {
+          if (event?.type === SSE_EVENT_TYPES.RESPONSE_DONE) {
             finalizeStream()
-            message.error(payload.message || '流式传输出错')
+            continue
+          }
+
+          if (event?.type === SSE_EVENT_TYPES.RESPONSE_MESSAGE_COMPLETED) {
+            continue
+          }
+
+          if (event?.type === SSE_EVENT_TYPES.RESPONSE_ERROR) {
+            finalizeStream()
+            message.error(event.message || '流式传输出错')
             return
           }
+
+          if (event?.type !== SSE_EVENT_TYPES.RESPONSE_MESSAGE_DELTA) {
+            continue
+          }
+
+          const payload = event?.response?.delta
 
           if (!isSchemaMessagePayload(payload)) {
             continue

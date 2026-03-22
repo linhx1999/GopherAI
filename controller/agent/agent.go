@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 
@@ -146,41 +145,28 @@ func setSSEHeaders(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 }
 
-func streamSSE(c *gin.Context, events <-chan agentService.StreamEvent) {
+func streamSSE(c *gin.Context, events <-chan agentService.StreamEnvelope) {
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-c.Request.Context().Done():
 			return false
 		case msg, ok := <-events:
 			if !ok {
-				c.SSEvent(ginSSEEventName, "[DONE]")
 				return false
 			}
-
-			switch {
-			case msg.Meta != nil:
-				c.SSEvent(ginSSEEventName, msg.Meta)
-			case msg.Error != nil:
-				c.SSEvent(ginSSEEventName, msg.Error)
-			case msg.Chunk != nil:
-				c.SSEvent(ginSSEEventName, msg.Chunk)
-			}
+			c.SSEvent(ginSSEEventName, msg)
 			return true
 		}
 	})
 }
 
-func oneShotSSEStream(event agentService.StreamEvent) <-chan agentService.StreamEvent {
-	events := make(chan agentService.StreamEvent, 1)
+func oneShotSSEStream(event agentService.StreamEnvelope) <-chan agentService.StreamEnvelope {
+	events := make(chan agentService.StreamEnvelope, 1)
 	events <- event
 	close(events)
 	return events
 }
 
-func errorEventStream(code_ code.Code, message string) <-chan agentService.StreamEvent {
-	errorMsg := message
-	if errorMsg == "" {
-		errorMsg = fmt.Sprintf("Error code: %d", code_)
-	}
-	return oneShotSSEStream(agentService.NewErrorEvent(errorMsg))
+func errorEventStream(code_ code.Code, message string) <-chan agentService.StreamEnvelope {
+	return oneShotSSEStream(agentService.NewErrorEvent(code_, message))
 }

@@ -10,6 +10,11 @@ import (
 
 type MessageSink func(*schema.Message) error
 
+type StreamMessageSink struct {
+	OnChunk    MessageSink
+	OnComplete MessageSink
+}
+
 // CollectAgentMessages 执行同步生成，并返回 Agent 过程中的完整产出消息。
 func CollectAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.Message) ([]*schema.Message, *schema.Message, error) {
 	iter := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent}).Run(ctx, input)
@@ -38,7 +43,7 @@ func CollectAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.
 }
 
 // StreamAgentMessages 执行流式生成，并按原始 chunk 顺序输出 schema.Message。
-func StreamAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.Message, sink MessageSink) ([]*schema.Message, error) {
+func StreamAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.Message, sink *StreamMessageSink) ([]*schema.Message, error) {
 	iter := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
 		EnableStreaming: true,
@@ -64,7 +69,7 @@ func StreamAgentMessages(ctx context.Context, agent adk.Agent, input []*schema.M
 	return produced, nil
 }
 
-func collectAgentEventMessages(event *adk.AgentEvent, sink MessageSink) ([]*schema.Message, error) {
+func collectAgentEventMessages(event *adk.AgentEvent, sink *StreamMessageSink) ([]*schema.Message, error) {
 	if event == nil {
 		return nil, nil
 	}
@@ -84,6 +89,11 @@ func collectAgentEventMessages(event *adk.AgentEvent, sink MessageSink) ([]*sche
 		if full == nil {
 			return nil, nil
 		}
+		if sink != nil && sink.OnComplete != nil {
+			if err := sink.OnComplete(full); err != nil {
+				return nil, err
+			}
+		}
 		return []*schema.Message{full}, nil
 	}
 
@@ -95,8 +105,13 @@ func collectAgentEventMessages(event *adk.AgentEvent, sink MessageSink) ([]*sche
 		return nil, nil
 	}
 
-	if sink != nil {
-		if err := sink(msg); err != nil {
+	if sink != nil && sink.OnChunk != nil {
+		if err := sink.OnChunk(msg); err != nil {
+			return nil, err
+		}
+	}
+	if sink != nil && sink.OnComplete != nil {
+		if err := sink.OnComplete(msg); err != nil {
 			return nil, err
 		}
 	}
@@ -104,7 +119,7 @@ func collectAgentEventMessages(event *adk.AgentEvent, sink MessageSink) ([]*sche
 	return []*schema.Message{msg}, nil
 }
 
-func collectStreamMessage(sr *schema.StreamReader[*schema.Message], sink MessageSink) (*schema.Message, error) {
+func collectStreamMessage(sr *schema.StreamReader[*schema.Message], sink *StreamMessageSink) (*schema.Message, error) {
 	defer sr.Close()
 
 	chunks := make([]*schema.Message, 0, 8)
@@ -119,8 +134,8 @@ func collectStreamMessage(sr *schema.StreamReader[*schema.Message], sink Message
 		}
 		lastChunk = msg
 		chunks = append(chunks, msg)
-		if sink != nil {
-			if err := sink(msg); err != nil {
+		if sink != nil && sink.OnChunk != nil {
+			if err := sink.OnChunk(msg); err != nil {
 				return nil, err
 			}
 		}
@@ -132,8 +147,8 @@ func collectStreamMessage(sr *schema.StreamReader[*schema.Message], sink Message
 	if needsSyntheticFinish(lastChunk) {
 		synthetic := buildSyntheticFinishChunk(lastChunk)
 		chunks = append(chunks, synthetic)
-		if sink != nil {
-			if err := sink(synthetic); err != nil {
+		if sink != nil && sink.OnChunk != nil {
+			if err := sink.OnChunk(synthetic); err != nil {
 				return nil, err
 			}
 		}

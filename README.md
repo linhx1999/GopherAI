@@ -61,8 +61,8 @@ pnpm dev
 ## 关键约定
 
 - `POST /api/v1/agent/*` 的 `tools` 表示“本次请求显式启用的工具 API 名称列表”
-- SSE 除 `meta` / `error` 外，`data` 直接发送完整的 `schema.Message` JSON
-- 流结束后服务端追加 `data: [DONE]`
+- SSE 每一帧统一输出 `{ type, code, message, response }` envelope
+- 流式事件固定使用 `response.created` / `response.message.delta` / `response.message.completed` / `response.error` / `response.done`
 - 历史消息接口返回 `{ message_id, index, message, created_at }`，其中 `message` 为完整 `schema.Message`
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，保证非流式生成后立即刷新也能读到最新 `reasoning_content`
 - 后端通过领域 DAO 访问 Redis；service 只负责决定何时读写缓存与何时回源 PostgreSQL
@@ -75,7 +75,7 @@ pnpm dev
 - `POST /api/v1/agent/*` 收到未知工具名时会直接返回请求参数错误，且不会创建会话、写入消息或触发模型调用
 - 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
 - 流式首轮对话改为“先 `POST /api/v1/sessions` 创建会话，再 `POST /api/v1/agent/stream` 拉取智能体输出”；`/agent/stream` 必须携带已有 `session_id`
-- 流式 SSE `meta` 只保留 `message_index` 等控制信息，不再回传 `session_id`
+- 流式 SSE 不再暴露 `message_index`；前端仅按事件顺序消费 `response.*` envelope
 - 非流式首轮对话仍可不传 `session_id`，由 `/agent/generate` 继续沿用现有隐式建会话逻辑
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
@@ -96,10 +96,11 @@ pnpm dev
 ### SSE 示例
 
 ```text
-data: {"type":"meta","message_index":4}
-data: {"role":"assistant","reasoning_content":"先确认约束"}
-data: {"role":"assistant","content":"答案","response_meta":{"finish_reason":"stop"}}
-data: [DONE]
+data: {"type":"response.created","code":1000,"message":"success","response":null}
+data: {"type":"response.message.delta","code":1000,"message":"success","response":{"delta":{"role":"assistant","reasoning_content":"先确认约束"}}}
+data: {"type":"response.message.delta","code":1000,"message":"success","response":{"delta":{"role":"assistant","content":"答案","response_meta":{"finish_reason":"stop"}}}}
+data: {"type":"response.message.completed","code":1000,"message":"success","response":{"message":{"role":"assistant","content":"答案","reasoning_content":"先确认约束","response_meta":{"finish_reason":"stop"}}}}
+data: {"type":"response.done","code":1000,"message":"success","response":null}
 ```
 
 执行约定：

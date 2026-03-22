@@ -72,8 +72,11 @@ export const API_ENDPOINTS = {
 
 // ==================== SSE 事件类型 ====================
 export const SSE_EVENT_TYPES = {
-  META: 'meta',
-  ERROR: 'error',
+  RESPONSE_CREATED: 'response.created',
+  RESPONSE_MESSAGE_DELTA: 'response.message.delta',
+  RESPONSE_MESSAGE_COMPLETED: 'response.message.completed',
+  RESPONSE_ERROR: 'response.error',
+  RESPONSE_DONE: 'response.done',
 }
 
 // ==================== 状态码 ====================

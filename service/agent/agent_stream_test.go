@@ -19,25 +19,26 @@ func TestEmitEventHonorsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	events := make(chan StreamEvent)
-	err := emitEvent(ctx, events, StreamEvent{
-		Meta: &StreamMeta{Type: StreamPayloadTypeMeta},
-	})
+	events := make(chan StreamEnvelope)
+	err := emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseCreated, nil))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
 
 func TestNewErrorEventBuildsErrorPayload(t *testing.T) {
-	event := NewErrorEvent("bad request")
-	if event.Error == nil {
-		t.Fatal("expected error payload")
+	event := NewErrorEvent(code.CodeInvalidParams, "bad request")
+	if event.Type != StreamEventTypeResponseError {
+		t.Fatalf("unexpected error type: %q", event.Type)
 	}
-	if event.Error.Type != StreamPayloadTypeError {
-		t.Fatalf("unexpected error type: %q", event.Error.Type)
+	if event.Code != code.CodeInvalidParams {
+		t.Fatalf("unexpected error code: %d", event.Code)
 	}
-	if event.Error.Message != "bad request" {
-		t.Fatalf("unexpected error message: %q", event.Error.Message)
+	if event.Message != "bad request" {
+		t.Fatalf("unexpected error message: %q", event.Message)
+	}
+	if event.Response != nil {
+		t.Fatalf("expected nil error response, got %#v", event.Response)
 	}
 }
 

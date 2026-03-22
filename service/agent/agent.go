@@ -26,31 +26,24 @@ const baseSystemPrompt = `你是一个智能助手，可以帮助用户解答各
 请用中文回答，保持回答简洁、准确、友好。`
 
 const (
-	StreamPayloadTypeMeta  = "meta"
-	StreamPayloadTypeError = "error"
+	StreamEventTypeResponseCreated          = "response.created"
+	StreamEventTypeResponseMessageDelta     = "response.message.delta"
+	StreamEventTypeResponseMessageCompleted = "response.message.completed"
+	StreamEventTypeResponseError            = "response.error"
+	StreamEventTypeResponseDone             = "response.done"
 )
 
-type StreamMeta struct {
-	Type         string `json:"type"`
-	MessageIndex int    `json:"message_index"`
-}
-
-type StreamError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
-// StreamEvent 表示 controller 可直接写入 SSE 的载荷。
-type StreamEvent struct {
-	Meta  *StreamMeta
-	Chunk *schema.Message
-	Error *StreamError
+type StreamEnvelope struct {
+	Type     string      `json:"type"`
+	Code     code.Code   `json:"code"`
+	Message  string      `json:"message"`
+	Response interface{} `json:"response"`
 }
 
 // StreamHandle 表示一个可被 controller 消费的事件流。
 type StreamHandle struct {
 	SessionID string
-	Events    <-chan StreamEvent
+	Events    <-chan StreamEnvelope
 }
 
 // GenerateResult 表示非流式生成结果。
@@ -76,12 +69,33 @@ type preparedChatExecution struct {
 	agent                      adk.Agent
 }
 
-func NewErrorEvent(message string) StreamEvent {
-	return StreamEvent{
-		Error: &StreamError{
-			Type:    StreamPayloadTypeError,
-			Message: message,
-		},
+type StreamDeltaResponse struct {
+	Delta *schema.Message `json:"delta"`
+}
+
+type StreamCompletedResponse struct {
+	Message *schema.Message `json:"message"`
+}
+
+func NewSuccessEvent(eventType string, response interface{}) StreamEnvelope {
+	return StreamEnvelope{
+		Type:     eventType,
+		Code:     code.CodeSuccess,
+		Message:  code.CodeSuccess.Msg(),
+		Response: response,
+	}
+}
+
+func NewErrorEvent(code_ code.Code, message string) StreamEnvelope {
+	errorMsg := strings.TrimSpace(message)
+	if errorMsg == "" {
+		errorMsg = code_.Msg()
+	}
+	return StreamEnvelope{
+		Type:     StreamEventTypeResponseError,
+		Code:     code_,
+		Message:  errorMsg,
+		Response: nil,
 	}
 }
 
@@ -161,7 +175,7 @@ func buildConversationMessages(history []*model.Message, userMessage *schema.Mes
 	return messages
 }
 
-func emitEvent(ctx context.Context, events chan<- StreamEvent, event StreamEvent) error {
+func emitEvent(ctx context.Context, events chan<- StreamEnvelope, event StreamEnvelope) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -389,21 +403,25 @@ func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, 
 		return nil, code_
 	}
 
-	events := make(chan StreamEvent)
+	events := make(chan StreamEnvelope)
 	go func() {
 		defer close(events)
 
-		if err := emitEvent(ctx, events, StreamEvent{
-			Meta: &StreamMeta{
-				Type:         StreamPayloadTypeMeta,
-				MessageIndex: run.firstAssistantMessageIndex,
-			},
-		}); err != nil {
+		if err := emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseCreated, nil)); err != nil {
 			return
 		}
 
-		produced, err := agentcommon.StreamAgentMessages(ctx, run.agent, run.conversation, func(msg *schema.Message) error {
-			return emitEvent(ctx, events, StreamEvent{Chunk: msg})
+		produced, err := agentcommon.StreamAgentMessages(ctx, run.agent, run.conversation, &agentcommon.StreamMessageSink{
+			OnChunk: func(msg *schema.Message) error {
+				return emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseMessageDelta, &StreamDeltaResponse{
+					Delta: msg,
+				}))
+			},
+			OnComplete: func(msg *schema.Message) error {
+				return emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseMessageCompleted, &StreamCompletedResponse{
+					Message: msg,
+				}))
+			},
 		})
 		if err != nil {
 			if isRequestCanceled(ctx, err) {
@@ -411,11 +429,12 @@ func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, 
 				return
 			}
 			log.Println("Stream StreamAgentMessages error:", err)
-			_ = emitEvent(ctx, events, NewErrorEvent("agent stream failed"))
+			_ = emitEvent(ctx, events, NewErrorEvent(code.AIModelFail, "agent stream failed"))
 			return
 		}
 
 		persistProducedMessages(run.session, run.userRefID, run.firstAssistantMessageIndex, produced)
+		_ = emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseDone, nil))
 	}()
 
 	return &StreamHandle{

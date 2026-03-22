@@ -319,10 +319,6 @@ export const parseSSELine = (line) => {
 
   const data = trimmedLine.slice(5).trim()
 
-  if (data === '[DONE]') {
-    return { type: 'done', data }
-  }
-
   if (data.startsWith('{')) {
     try {
       const parsed = JSON.parse(data)
