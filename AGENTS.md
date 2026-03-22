@@ -149,10 +149,12 @@ type Message struct {
 - 聊天页前端默认开启流式输出和思考模式；输入区开关只影响当前页面会话中的后续请求，不做本地持久化
 - assistant 的思考和工具过程统一使用 `ThoughtChain` 展示；最终回答正文仍保留为独立 bubble
 - 前端以 `response.message.completed` 作为 assistant/tool 消息的正式边界；`response.message.delta` 只负责增量渲染和 loading 态，不再单独决定 ThoughtChain 阶段切换
+- 流式正文直接按服务端 SSE 增量刷新，不再额外叠加本地逐字打字动画，避免闪烁和回退
 - assistant 的 `reasoning_content` 统一映射为 `ThoughtChain` 中的“深度思考”步骤；thinking mode 开启后，流式开始即可先显示 loading 的思考步骤
 - assistant 完整消息若包含 `tool_calls`，思考内容保留为独立步骤，工具调用步骤的 `description` 仅承载调用前正文或简短说明，步骤 `title` 使用工具目录中的 API 名称映射展示名
 - 当同一条 assistant 同时存在多段思考和工具步骤时，ThoughtChain 必须按步骤产生的时间顺序展示；典型顺序为“第一次深度思考 -> 工具调用 -> 工具结果 -> 第二次深度思考”
 - ThoughtChain 统一通过 `defaultExpandedKeys` 默认展开全部步骤；reasoning 内容、工具调用参数和工具执行结果首次渲染时都应直接展示，用户可再手动折叠
+- 前端必须把 `response.message.delta` 与 `response.message.completed` 作为两类事件处理：delta 只更新活动缓冲，completed 作为最终真值覆盖对应步骤，不得再对 completed 做字符串二次拼接
 - “深度思考”步骤的描述文案必须随状态切换：`loading` 显示“模型思考”，`success` 显示“思考完成”，`error` 显示“思考中断”
 - 前端识别“工具调用 assistant 消息”时，以 `response_meta.finish_reason=tool_calls` 为准；最终 assistant completed 即使仍附带历史 `tool_calls`，也必须继续渲染最终回答 bubble
 - `role=tool` 的完整消息作为独立结果步骤挂到同一条 assistant 记录下；最终 assistant 完整消息才保留为正文 bubble

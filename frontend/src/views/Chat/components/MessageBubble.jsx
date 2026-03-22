@@ -1,5 +1,5 @@
+import { useCallback, useMemo, useState } from 'react'
 import { ThoughtChain } from '@ant-design/x'
-import useStreamContent from '../hooks/useStreamContent'
 import {
   buildToolTraceItems,
   renderMarkdown,
@@ -7,10 +7,15 @@ import {
 
 const ToolThoughtChain = ({ record = null, toolTraceRecords = [], toolDisplayNames }) => {
   const items = buildToolTraceItems({ record, toolTraceRecords, toolDisplayNames })
-  const defaultExpandedKeys = items
+  const defaultExpandedKeys = useMemo(() => items
     .map((item) => item?.key)
-    .filter(Boolean)
-  const thoughtChainKey = defaultExpandedKeys.join('|')
+    .filter(Boolean), [items])
+  const [collapsedKeys, setCollapsedKeys] = useState([])
+  const expandedKeys = useMemo(() => defaultExpandedKeys.filter((key) => !collapsedKeys.includes(key)), [collapsedKeys, defaultExpandedKeys])
+  const handleExpand = useCallback((nextExpandedKeys) => {
+    const expandedKeySet = new Set(nextExpandedKeys)
+    setCollapsedKeys(defaultExpandedKeys.filter((key) => !expandedKeySet.has(key)))
+  }, [defaultExpandedKeys])
 
   if (!items.length) {
     return null
@@ -18,10 +23,10 @@ const ToolThoughtChain = ({ record = null, toolTraceRecords = [], toolDisplayNam
 
   return (
     <ThoughtChain
-      key={thoughtChainKey}
       className="assistant-thought-chain"
       items={items}
-      defaultExpandedKeys={defaultExpandedKeys}
+      expandedKeys={expandedKeys}
+      onExpand={handleExpand}
       line="dashed"
     />
   )
@@ -29,15 +34,8 @@ const ToolThoughtChain = ({ record = null, toolTraceRecords = [], toolDisplayNam
 
 const AssistantAnswerContent = ({ record }) => {
   const message = record.message || {}
-  const shouldAnimate = record.renderMode === 'stream' && record.pending
   const rawAnswerContent = message.content || ''
-  const [streamContent, isContentDone] = useStreamContent(rawAnswerContent, {
-    step: 3,
-    interval: 30,
-    enabled: shouldAnimate
-  })
-  const answerDisplayContent = shouldAnimate && !isContentDone ? streamContent : rawAnswerContent
-  return renderMarkdown(answerDisplayContent)
+  return renderMarkdown(rawAnswerContent)
 }
 
 export { AssistantAnswerContent, ToolThoughtChain }

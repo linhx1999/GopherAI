@@ -24,7 +24,9 @@ import {
   isToolCallAssistantMessage,
   isSchemaMessagePayload,
   buildDisplayMessages,
-  mergeSchemaMessageChunk,
+  cloneSchemaMessage,
+  finalizeSchemaMessage,
+  mergeSchemaMessageDelta,
   normalizeEnabledToolAPINames,
   parseSSELine
 } from '../utils/helpers.jsx'
@@ -266,7 +268,7 @@ const createToolTraceRecord = ({
 }) => createRecord({
   key,
   index,
-  message: mergeSchemaMessageChunk({}, message),
+  message: cloneSchemaMessage(message),
   pending: status === TOOL_TRACE_STATUS.LOADING,
   renderMode,
   createdAt,
@@ -884,7 +886,7 @@ const useChat = () => {
       }
 
       const reasoningMessage = createReasoningStepMessage(
-        mergeSchemaMessageChunk(activeAssistantMessage, messagePayload)
+        finalizeSchemaMessage(activeAssistantMessage, messagePayload)
       )
       const hasReasoning = Boolean(String(reasoningMessage.reasoning_content || '').trim())
 
@@ -908,7 +910,7 @@ const useChat = () => {
 
     const startOrUpdateToolCallStep = (chunk) => {
       ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
-      activeToolCallMessage = mergeSchemaMessageChunk(
+      activeToolCallMessage = mergeSchemaMessageDelta(
         activeToolCallMessage || createEmptyAssistantMessage(),
         {
           ...chunk,
@@ -955,7 +957,7 @@ const useChat = () => {
     const completeToolCallStep = (messagePayload) => {
       ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
       finalizeReasoningStep(messagePayload)
-      const completedMessage = mergeSchemaMessageChunk(
+      const completedMessage = finalizeSchemaMessage(
         activeToolCallMessage || createEmptyAssistantMessage(),
         messagePayload
       )
@@ -999,7 +1001,7 @@ const useChat = () => {
 
     const startOrUpdateToolResultStep = (chunk) => {
       ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
-      activeToolResultMessage = mergeSchemaMessageChunk(activeToolResultMessage || {}, chunk)
+      activeToolResultMessage = mergeSchemaMessageDelta(activeToolResultMessage || {}, chunk)
 
       if (!activeToolResultTraceKey) {
         const traceRecord = createToolTraceRecord({
@@ -1023,7 +1025,7 @@ const useChat = () => {
 
     const completeToolResultStep = (messagePayload) => {
       ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
-      const completedMessage = mergeSchemaMessageChunk(activeToolResultMessage || {}, messagePayload)
+      const completedMessage = finalizeSchemaMessage(activeToolResultMessage || {}, messagePayload)
 
       if (activeToolResultTraceKey) {
         updateToolTraceRecord(activeToolResultTraceKey, (traceRecord) => ({
@@ -1047,7 +1049,7 @@ const useChat = () => {
 
     const updateAssistantDelta = (chunk) => {
       ensureActiveAssistantRecord(activeRecordMode)
-      activeAssistantMessage = mergeSchemaMessageChunk(activeAssistantMessage, chunk)
+      activeAssistantMessage = mergeSchemaMessageDelta(activeAssistantMessage, chunk)
       if (String(activeAssistantMessage.reasoning_content || '').trim()) {
         ensureReasoningStep()
       }
@@ -1061,7 +1063,7 @@ const useChat = () => {
     const completeAssistantMessage = (messagePayload) => {
       ensureActiveAssistantRecord(activeRecordMode)
       finalizeReasoningStep(messagePayload)
-      const completedMessage = mergeSchemaMessageChunk(activeAssistantMessage, messagePayload)
+      const completedMessage = finalizeSchemaMessage(activeAssistantMessage, messagePayload)
       const nextRenderMode = activeRecordMode === ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
         ? ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
         : ASSISTANT_DISPLAY_MODES.DEFAULT

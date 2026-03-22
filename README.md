@@ -6,7 +6,7 @@
 
 - 多模型对话：支持 OpenAI 兼容模型、本地模型与 RAG 场景
 - 流式响应：SSE 实时输出，历史消息直接完整回放
-- 思考模式：聊天页默认开启思考模式，assistant 的思考和工具过程统一使用 `ThoughtChain` 展示；最终回答正文仍保留独立 bubble，流式按 `response.message.completed` 收口消息边界
+- 思考模式：聊天页默认开启思考模式，assistant 的思考和工具过程统一使用 `ThoughtChain` 展示；最终回答正文仍保留独立 bubble，流式按 `response.message.completed` 收口消息边界，正文直接按 SSE 增量刷新
 - 显式工具启用：仅本轮勾选的工具参与执行，不再隐式启用默认工具
 - DeepAgent：支持在聊天页切换到 DeepAgent 模式，走独立 `/api/v1/deep-agent/*` 接口，并为每个用户按需启动独立 Docker 容器
 - 自定义 MCP：支持按用户配置远程 SSE / HTTP MCP 服务，在聊天页按“服务”整体启用
@@ -96,6 +96,7 @@ pnpm dev
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 - 流式阶段中，`reasoning_content` 会先进入 `ThoughtChain` 的“深度思考”步骤；工具调用和工具结果继续作为后续步骤，`response.message.completed` 才正式提交各步骤和最终 assistant 正文
+- 前端会把 `response.message.delta` 与 `response.message.completed` 分开处理：delta 只更新活动内容，completed 作为最终真值覆盖对应正文、工具参数和工具结果，避免重复渲染
 - assistant 同时带有 `reasoning_content` 与 `tool_calls` 时，思考内容会保留为独立的“深度思考”步骤，不再并入首个工具调用步骤说明
 - 当同一条 assistant 同时包含多段思考与工具步骤时，ThoughtChain 严格按步骤产生的时间顺序展示；典型顺序为“第一次深度思考 -> 工具调用 -> 工具结果 -> 第二次深度思考”
 - ThoughtChain 通过 `defaultExpandedKeys` 默认展开全部步骤；思考内容、工具参数和工具结果首次渲染时都会直接展示，用户仍可手动折叠

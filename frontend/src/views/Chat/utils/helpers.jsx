@@ -73,6 +73,57 @@ export const createRoleConfig = () => ({
   system: { placement: 'center', variant: 'borderless', avatar: null, style: { textAlign: 'center' } }
 })
 
+const cloneToolCalls = (toolCalls = []) => toolCalls.map((call) => ({
+  ...call,
+  function: call.function ? { ...call.function } : undefined
+}))
+
+const mergeDeltaText = (baseText, nextText) => {
+  const previous = String(baseText || '')
+  const incoming = String(nextText || '')
+
+  if (!incoming) {
+    return previous
+  }
+
+  if (!previous) {
+    return incoming
+  }
+
+  if (incoming.startsWith(previous)) {
+    return incoming
+  }
+
+  return `${previous}${incoming}`
+}
+
+const pickCompletedText = (baseText, completedText) => {
+  if (completedText === undefined || completedText === null) {
+    return String(baseText || '')
+  }
+
+  const previous = String(baseText || '')
+  const completed = String(completedText || '')
+
+  if (!previous) {
+    return completed
+  }
+
+  if (!completed) {
+    return previous
+  }
+
+  if (completed.startsWith(previous)) {
+    return completed
+  }
+
+  if (previous.startsWith(completed)) {
+    return previous
+  }
+
+  return completed
+}
+
 const mergeToolCalls = (baseCalls = [], nextCalls = []) => {
   const merged = baseCalls.map((call) => ({
     ...call,
@@ -105,7 +156,7 @@ const mergeToolCalls = (baseCalls = [], nextCalls = []) => {
       function: {
         ...previous.function,
         ...call.function,
-        arguments: `${previous.function?.arguments || ''}${call.function?.arguments || ''}`
+        arguments: mergeDeltaText(previous.function?.arguments, call.function?.arguments)
       }
     }
   })
@@ -113,20 +164,54 @@ const mergeToolCalls = (baseCalls = [], nextCalls = []) => {
   return merged
 }
 
-export const mergeSchemaMessageChunk = (baseMessage = {}, chunk = {}) => {
+export const cloneSchemaMessage = (message = {}) => ({
+  ...message,
+  multi_content: Array.isArray(message.multi_content) ? [...message.multi_content] : [],
+  user_input_multi_content: Array.isArray(message.user_input_multi_content) ? [...message.user_input_multi_content] : [],
+  assistant_output_multi_content: Array.isArray(message.assistant_output_multi_content) ? [...message.assistant_output_multi_content] : [],
+  tool_calls: cloneToolCalls(Array.isArray(message.tool_calls) ? message.tool_calls : []),
+  response_meta: message.response_meta ? { ...message.response_meta } : undefined
+})
+
+export const mergeSchemaMessageDelta = (baseMessage = {}, chunk = {}) => {
   const safeBaseMessage = baseMessage || {}
   const safeChunk = chunk || {}
 
   return {
     ...safeBaseMessage,
     ...safeChunk,
-    content: `${safeBaseMessage.content || ''}${safeChunk.content || ''}`,
-    reasoning_content: `${safeBaseMessage.reasoning_content || ''}${safeChunk.reasoning_content || ''}`,
+    content: mergeDeltaText(safeBaseMessage.content, safeChunk.content),
+    reasoning_content: mergeDeltaText(safeBaseMessage.reasoning_content, safeChunk.reasoning_content),
     multi_content: safeChunk.multi_content?.length ? [...(safeBaseMessage.multi_content || []), ...safeChunk.multi_content] : (safeBaseMessage.multi_content || []),
     user_input_multi_content: safeChunk.user_input_multi_content?.length ? [...(safeBaseMessage.user_input_multi_content || []), ...safeChunk.user_input_multi_content] : (safeBaseMessage.user_input_multi_content || []),
     assistant_output_multi_content: safeChunk.assistant_output_multi_content?.length ? [...(safeBaseMessage.assistant_output_multi_content || []), ...safeChunk.assistant_output_multi_content] : (safeBaseMessage.assistant_output_multi_content || []),
     tool_calls: mergeToolCalls(safeBaseMessage.tool_calls || [], safeChunk.tool_calls || []),
     response_meta: safeChunk.response_meta || safeBaseMessage.response_meta,
+  }
+}
+
+export const finalizeSchemaMessage = (baseMessage = {}, completedMessage = {}) => {
+  const safeBaseMessage = baseMessage || {}
+  const safeCompletedMessage = completedMessage || {}
+
+  return {
+    ...safeBaseMessage,
+    ...safeCompletedMessage,
+    content: pickCompletedText(safeBaseMessage.content, safeCompletedMessage.content),
+    reasoning_content: pickCompletedText(safeBaseMessage.reasoning_content, safeCompletedMessage.reasoning_content),
+    multi_content: safeCompletedMessage.multi_content?.length
+      ? [...safeCompletedMessage.multi_content]
+      : [...(safeBaseMessage.multi_content || [])],
+    user_input_multi_content: safeCompletedMessage.user_input_multi_content?.length
+      ? [...safeCompletedMessage.user_input_multi_content]
+      : [...(safeBaseMessage.user_input_multi_content || [])],
+    assistant_output_multi_content: safeCompletedMessage.assistant_output_multi_content?.length
+      ? [...safeCompletedMessage.assistant_output_multi_content]
+      : [...(safeBaseMessage.assistant_output_multi_content || [])],
+    tool_calls: safeCompletedMessage.tool_calls !== undefined
+      ? mergeToolCalls(safeBaseMessage.tool_calls || [], safeCompletedMessage.tool_calls || [])
+      : cloneToolCalls(safeBaseMessage.tool_calls || []),
+    response_meta: safeCompletedMessage.response_meta || safeBaseMessage.response_meta,
   }
 }
 
