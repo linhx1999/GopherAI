@@ -62,13 +62,12 @@ func GenerateHandler(c *gin.Context) {
 // POST /api/v1/agent/stream
 func StreamHandler(c *gin.Context) {
 	req, err := parseChatRequest(c)
+	setSSEHeaders(c)
 	if err != nil {
-		setSSEHeaders(c)
 		streamSSE(c, errorEventStream(code.CodeInvalidParams, err.Error()))
 		return
 	}
 	if req.SessionID == "" {
-		setSSEHeaders(c)
 		streamSSE(c, errorEventStream(code.CodeInvalidParams, "session_id is required"))
 		return
 	}
@@ -82,12 +81,10 @@ func StreamHandler(c *gin.Context) {
 		req.ThinkingMode,
 	)
 	if code_ != code.CodeSuccess {
-		setSSEHeaders(c)
 		streamSSE(c, errorEventStream(code_, ""))
 		return
 	}
 
-	setSSEHeaders(c)
 	streamSSE(c, stream.Events)
 }
 
