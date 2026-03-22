@@ -332,6 +332,7 @@ func resolveExecutionSession(userRefID uint, sessionID, userMessage string, allo
 func prepareChatExecution(
 	ctx context.Context,
 	userRefID uint,
+	userUUID string,
 	sessionID, userMessage string,
 	enabledToolNames []string,
 	mcpServerIDs []string,
@@ -399,7 +400,7 @@ func prepareChatExecution(
 		}
 		cleanupFns = append(cleanupFns, releaseExecution)
 
-		handle, handleErr := runtimeManager.BuildHandle(ctx, userRefID)
+		handle, handleErr := runtimeManager.BuildHandle(ctx, userRefID, userUUID)
 		if handleErr != nil {
 			log.Println("prepareChatExecution BuildHandle error:", handleErr)
 			return nil, code.CodeDeepAgentContainerFailed
@@ -478,7 +479,7 @@ func prepareChatExecution(
 
 // Generate 同步生成响应。
 func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true, executionModeChat)
+	run, code_ := prepareChatExecution(ctx, userRefID, "", sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true, executionModeChat)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -519,8 +520,8 @@ func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string
 	}, code.CodeSuccess
 }
 
-func DeepGenerate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true, executionModeDeep)
+func DeepGenerate(ctx context.Context, userRefID uint, userUUID, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*GenerateResult, code.Code) {
+	run, code_ := prepareChatExecution(ctx, userRefID, userUUID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true, executionModeDeep)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -563,7 +564,7 @@ func DeepGenerate(ctx context.Context, userRefID uint, sessionID, userMessage st
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
 func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false, executionModeChat)
+	run, code_ := prepareChatExecution(ctx, userRefID, "", sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false, executionModeChat)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -613,8 +614,8 @@ func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, 
 	}, code.CodeSuccess
 }
 
-func DeepStream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false, executionModeDeep)
+func DeepStream(ctx context.Context, userRefID uint, userUUID, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*StreamHandle, code.Code) {
+	run, code_ := prepareChatExecution(ctx, userRefID, userUUID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false, executionModeDeep)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}

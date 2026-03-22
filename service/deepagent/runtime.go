@@ -21,7 +21,7 @@ func FeatureEnabled() bool {
 	return commondeep.FeatureEnabled()
 }
 
-func GetRuntimeStatus(ctx context.Context, userRefID uint) (*RuntimeStatus, code.Code) {
+func GetRuntimeStatus(ctx context.Context, userRefID uint, userUUID string) (*RuntimeStatus, code.Code) {
 	if !FeatureEnabled() {
 		return nil, code.CodeDeepAgentFeatureDisabled
 	}
@@ -32,7 +32,7 @@ func GetRuntimeStatus(ctx context.Context, userRefID uint) (*RuntimeStatus, code
 		return nil, code.CodeDeepAgentContainerFailed
 	}
 
-	info, err := manager.GetRuntimeInfo(ctx, userRefID)
+	info, err := manager.GetRuntimeInfo(ctx, userRefID, userUUID)
 	if err != nil {
 		log.Printf("GetRuntimeStatus error: %v", err)
 		return nil, code.CodeDeepAgentContainerFailed
@@ -40,19 +40,19 @@ func GetRuntimeStatus(ctx context.Context, userRefID uint) (*RuntimeStatus, code
 	return convertRuntimeInfo(info), code.CodeSuccess
 }
 
-func RestartRuntime(ctx context.Context, userRefID uint) (*RuntimeStatus, code.Code) {
-	return mutateRuntime(ctx, userRefID, func(manager *commondeep.RuntimeManager) (*commondeep.RuntimeInfo, error) {
-		return manager.RestartRuntime(ctx, userRefID)
+func RestartRuntime(ctx context.Context, userRefID uint, userUUID string) (*RuntimeStatus, code.Code) {
+	return mutateRuntime(ctx, userRefID, userUUID, func(manager *commondeep.RuntimeManager) (*commondeep.RuntimeInfo, error) {
+		return manager.RestartRuntime(ctx, userRefID, userUUID)
 	})
 }
 
-func RebuildRuntime(ctx context.Context, userRefID uint) (*RuntimeStatus, code.Code) {
-	return mutateRuntime(ctx, userRefID, func(manager *commondeep.RuntimeManager) (*commondeep.RuntimeInfo, error) {
-		return manager.RebuildRuntime(ctx, userRefID)
+func RebuildRuntime(ctx context.Context, userRefID uint, userUUID string) (*RuntimeStatus, code.Code) {
+	return mutateRuntime(ctx, userRefID, userUUID, func(manager *commondeep.RuntimeManager) (*commondeep.RuntimeInfo, error) {
+		return manager.RebuildRuntime(ctx, userRefID, userUUID)
 	})
 }
 
-func mutateRuntime(ctx context.Context, userRefID uint, action func(manager *commondeep.RuntimeManager) (*commondeep.RuntimeInfo, error)) (*RuntimeStatus, code.Code) {
+func mutateRuntime(ctx context.Context, userRefID uint, userUUID string, action func(manager *commondeep.RuntimeManager) (*commondeep.RuntimeInfo, error)) (*RuntimeStatus, code.Code) {
 	if !FeatureEnabled() {
 		return nil, code.CodeDeepAgentFeatureDisabled
 	}

@@ -305,7 +305,7 @@ const InputArea = ({
             <Space size="small" wrap>
               <Tag color={runtimeMeta.color}>{runtimeMeta.label}</Tag>
               <span style={{ color: '#666', fontSize: 12 }}>
-                {deepAgentRuntime?.lastError || '每个用户复用一个独立容器与工作区副本'}
+                {deepAgentRuntime?.lastError || '每个用户复用一个独立容器与空工作区'}
               </span>
             </Space>
 

@@ -79,7 +79,8 @@ pnpm dev
 - `GET /api/v1/tools` 额外返回 `deep_agent_enabled`，用于前端决定是否展示 DeepAgent 模式入口
 - 后端工具按工具名拆分到 `common/agent/tools/*.go`；目录下除工具文件外，仅保留 `manager.go` 与 `interface.go` 两个收口文件，`ResolveRequestedTools` 会按请求中的工具名直接解析 `[]tool.BaseTool`
 - 自定义 MCP 连接逻辑集中在 `common/mcp/`：负责请求头加密解密、按 `transport_type` 初始化 SSE 或 streamable HTTP client，并通过 Eino MCP 适配层拉取远程工具
-- DeepAgent 运行时集中在 `common/deepagent/`：负责用户私有工作区副本、Docker 容器生命周期、根目录受限文件工具和容器内命令执行
+- DeepAgent 运行时集中在 `common/deepagent/`：负责用户私有空工作区、Docker 容器生命周期、根目录受限文件工具和容器内命令执行
+- DeepAgent 工作区固定为仓库根目录下的 `workspace/<userUUID>`；首次使用时为空目录，“重建工作区”会清空该目录后重新创建
 - 生成与流式执行共享同一套准备逻辑，服务端按请求参数直接装配 agent 与执行上下文，不再额外包装内部请求对象
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequentialthinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
 - `sequentialthinking` 在 `common/agent/tools/sequential_thinking.go` 中维护单一工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`ResolveRequestedTools` 会为每次请求创建独立实例，避免跨请求共享思维链状态
@@ -87,7 +88,7 @@ pnpm dev
 - `POST /api/v1/agent/*` 收到未知工具名时会直接返回请求参数错误，且不会创建会话、写入消息或触发模型调用
 - MCP 服务配置按用户维度保存在数据库；聊天时只按请求中的 `mcp_server_ids` 临时建立连接，不写入 Session
 - 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
-- DeepAgent 执行层基于 Eino ADK `deep.New(...)`；同一用户所有会话共享一个容器和一份工作区副本，但运行时请求串行
+- DeepAgent 执行层基于 Eino ADK `deep.New(...)`；同一用户所有会话共享一个容器和一个 `workspace/<userUUID>` 空工作区，但运行时请求串行
 - 流式首轮对话改为“先 `POST /api/v1/sessions` 创建会话，再 `POST /api/v1/agent/stream` 拉取智能体输出”；`/agent/stream` 必须携带已有 `session_id`
 - 流式 SSE 不再暴露 `message_index`；前端仅按事件顺序消费 `response.*` envelope
 - 聊天页前端默认使用流式输出和思考模式；用户仍可通过输入区开关临时切换为非流式或关闭思考模式
@@ -188,7 +189,7 @@ data: {"type":"response.done","code":1000,"message":"success","response":null}
 | MinIO | `MINIO_ENDPOINT` `MINIO_ACCESS_KEY` `MINIO_SECRET_KEY` `MINIO_BUCKET` `MINIO_USE_SSL` |
 | TTS | `VOICE_API_KEY` `VOICE_SECRET_KEY` |
 | MCP | `MCP_SECRET_KEY` |
-| DeepAgent | `DEEP_AGENT_ENABLED` `DEEP_AGENT_IMAGE` `DEEP_AGENT_WORKSPACE_ROOT` `DEEP_AGENT_TEMPLATE_DIR` `DEEP_AGENT_CONTAINER_WORKDIR` `DEEP_AGENT_IDLE_TTL_MINUTES` `DEEP_AGENT_MAX_ITERATIONS` `DEEP_AGENT_DOCKER_HOST` `DEEP_AGENT_REAPER_INTERVAL_SECS` |
+| DeepAgent | `DEEP_AGENT_ENABLED` `DEEP_AGENT_IMAGE` `DEEP_AGENT_CONTAINER_WORKDIR` `DEEP_AGENT_IDLE_TTL_MINUTES` `DEEP_AGENT_MAX_ITERATIONS` `DEEP_AGENT_DOCKER_HOST` `DEEP_AGENT_REAPER_INTERVAL_SECS` |
 
 ## 项目结构
 

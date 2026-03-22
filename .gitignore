@@ -59,6 +59,7 @@ frontend/dist/
 
 uploads
 runtime/
+workspace/
 plan.md
 gopherai
 .gitignore

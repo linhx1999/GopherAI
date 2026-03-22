@@ -84,8 +84,6 @@ type MCPConfig struct {
 type DeepAgentConfig struct {
 	Enabled            bool
 	Image              string
-	WorkspaceRoot      string
-	TemplateDir        string
 	ContainerWorkdir   string
 	IdleTTLMinutes     int
 	MaxIterations      int
@@ -213,8 +211,6 @@ func InitConfig() error {
 		DeepAgentConfig: DeepAgentConfig{
 			Enabled:            getEnv("DEEP_AGENT_ENABLED", "false") == "true",
 			Image:              getEnv("DEEP_AGENT_IMAGE", "gopherai/deep-agent:latest"),
-			WorkspaceRoot:      getEnv("DEEP_AGENT_WORKSPACE_ROOT", "./runtime/deepagent"),
-			TemplateDir:        getEnv("DEEP_AGENT_TEMPLATE_DIR", "."),
 			ContainerWorkdir:   getEnv("DEEP_AGENT_CONTAINER_WORKDIR", "/workspace"),
 			IdleTTLMinutes:     getEnvInt("DEEP_AGENT_IDLE_TTL_MINUTES", 30),
 			MaxIterations:      getEnvInt("DEEP_AGENT_MAX_ITERATIONS", 20),

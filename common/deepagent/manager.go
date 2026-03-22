@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -101,7 +100,7 @@ func getRuntimeManager(ctx context.Context) (*RuntimeManager, error) {
 			return
 		}
 
-		workspaceRoot, err := filepathAbs(config.GetConfig().DeepAgentConfig.WorkspaceRoot)
+		workspaceRoot, err := workspaceRootPath()
 		if err != nil {
 			runtimeManagerErr = err
 			return
@@ -149,8 +148,8 @@ func (m *RuntimeManager) acquireAdmin(userRefID uint) (func(), error) {
 	return m.lockManager.Acquire(context.Background(), lockPrefixExec+fmt.Sprint(userRefID), executionLockTTL)
 }
 
-func (m *RuntimeManager) GetRuntimeInfo(ctx context.Context, userRefID uint) (*RuntimeInfo, error) {
-	runtime, err := m.loadOrCreateRuntime(userRefID)
+func (m *RuntimeManager) GetRuntimeInfo(ctx context.Context, userRefID uint, userUUID string) (*RuntimeInfo, error) {
+	runtime, err := m.loadOrCreateRuntime(ctx, userRefID, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -160,8 +159,8 @@ func (m *RuntimeManager) GetRuntimeInfo(ctx context.Context, userRefID uint) (*R
 	return buildRuntimeInfo(runtime), nil
 }
 
-func (m *RuntimeManager) BuildHandle(ctx context.Context, userRefID uint) (*RuntimeHandle, error) {
-	runtime, err := m.EnsureRuntime(ctx, userRefID)
+func (m *RuntimeManager) BuildHandle(ctx context.Context, userRefID uint, userUUID string) (*RuntimeHandle, error) {
+	runtime, err := m.EnsureRuntime(ctx, userRefID, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -171,17 +170,18 @@ func (m *RuntimeManager) BuildHandle(ctx context.Context, userRefID uint) (*Runt
 		Shell: &containerShell{
 			manager:   m,
 			userRefID: userRefID,
+			userUUID:  userUUID,
 		},
 	}, nil
 }
 
-func (m *RuntimeManager) EnsureRuntime(ctx context.Context, userRefID uint) (*model.DeepAgentRuntime, error) {
-	runtime, err := m.loadOrCreateRuntime(userRefID)
+func (m *RuntimeManager) EnsureRuntime(ctx context.Context, userRefID uint, userUUID string) (*model.DeepAgentRuntime, error) {
+	runtime, err := m.loadOrCreateRuntime(ctx, userRefID, userUUID)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := ensureWorkspace(userRefID, runtime.WorkspacePath); err != nil {
+	if err := ensureWorkspace(runtime.WorkspacePath); err != nil {
 		runtime.Status = model.DeepAgentRuntimeStatusError
 		runtime.LastError = err.Error()
 		_ = deepagentDAO.Save(runtime)
@@ -208,18 +208,18 @@ func (m *RuntimeManager) EnsureRuntime(ctx context.Context, userRefID uint) (*mo
 	return runtime, nil
 }
 
-func (m *RuntimeManager) RestartRuntime(ctx context.Context, userRefID uint) (*RuntimeInfo, error) {
+func (m *RuntimeManager) RestartRuntime(ctx context.Context, userRefID uint, userUUID string) (*RuntimeInfo, error) {
 	release, err := m.acquireAdmin(userRefID)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 
-	runtime, err := m.loadOrCreateRuntime(userRefID)
+	runtime, err := m.loadOrCreateRuntime(ctx, userRefID, userUUID)
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureWorkspace(userRefID, runtime.WorkspacePath); err != nil {
+	if err := ensureWorkspace(runtime.WorkspacePath); err != nil {
 		return nil, err
 	}
 	if err := m.removeContainer(ctx, runtime); err != nil {
@@ -243,14 +243,14 @@ func (m *RuntimeManager) RestartRuntime(ctx context.Context, userRefID uint) (*R
 	return buildRuntimeInfo(runtime), nil
 }
 
-func (m *RuntimeManager) RebuildRuntime(ctx context.Context, userRefID uint) (*RuntimeInfo, error) {
+func (m *RuntimeManager) RebuildRuntime(ctx context.Context, userRefID uint, userUUID string) (*RuntimeInfo, error) {
 	release, err := m.acquireAdmin(userRefID)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 
-	runtime, err := m.loadOrCreateRuntime(userRefID)
+	runtime, err := m.loadOrCreateRuntime(ctx, userRefID, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (m *RuntimeManager) RebuildRuntime(ctx context.Context, userRefID uint) (*R
 	if err := m.removeContainer(ctx, runtime); err != nil {
 		return nil, err
 	}
-	if err := rebuildWorkspace(userRefID, runtime.WorkspacePath); err != nil {
+	if err := rebuildWorkspace(runtime.WorkspacePath); err != nil {
 		runtime.Status = model.DeepAgentRuntimeStatusError
 		runtime.LastError = err.Error()
 		_ = deepagentDAO.Save(runtime)
@@ -287,8 +287,8 @@ func (m *RuntimeManager) RebuildRuntime(ctx context.Context, userRefID uint) (*R
 	return buildRuntimeInfo(runtime), nil
 }
 
-func (m *RuntimeManager) ExecInContainer(ctx context.Context, userRefID uint, command string) (*filesystem.ExecuteResponse, error) {
-	runtime, err := m.EnsureRuntime(ctx, userRefID)
+func (m *RuntimeManager) ExecInContainer(ctx context.Context, userRefID uint, userUUID, command string) (*filesystem.ExecuteResponse, error) {
+	runtime, err := m.EnsureRuntime(ctx, userRefID, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -365,26 +365,34 @@ func (m *RuntimeManager) ReapIdleRuntimes(ctx context.Context) {
 	}
 }
 
-func (m *RuntimeManager) loadOrCreateRuntime(userRefID uint) (*model.DeepAgentRuntime, error) {
+func (m *RuntimeManager) loadOrCreateRuntime(ctx context.Context, userRefID uint, userUUID string) (*model.DeepAgentRuntime, error) {
+	workspacePath, err := workspacePathForUser(userUUID)
+	if err != nil {
+		return nil, err
+	}
+
 	runtime, err := deepagentDAO.GetByUserRefID(userRefID)
 	if err == nil {
-		if runtime.WorkspacePath == "" {
-			runtime.WorkspacePath, err = workspacePathForUser(userRefID)
-			if err != nil {
+		changed := false
+		if runtime.ContainerName == "" {
+			runtime.ContainerName = containerNameForUser(userRefID)
+			changed = true
+		}
+		if runtime.WorkspacePath != workspacePath {
+			runtime.WorkspacePath = workspacePath
+			changed = true
+			if err := m.removeContainer(ctx, runtime); err != nil {
 				return nil, err
 			}
 		}
-		if runtime.ContainerName == "" {
-			runtime.ContainerName = containerNameForUser(userRefID)
+		if changed {
+			if err := deepagentDAO.Save(runtime); err != nil {
+				return nil, err
+			}
 		}
 		return runtime, nil
 	}
 	if err != nil && err != gorm.ErrRecordNotFound {
-		return nil, err
-	}
-
-	workspacePath, err := workspacePathForUser(userRefID)
-	if err != nil {
 		return nil, err
 	}
 
@@ -516,6 +524,7 @@ func (m *RuntimeManager) removeContainer(ctx context.Context, runtime *model.Dee
 type containerShell struct {
 	manager   *RuntimeManager
 	userRefID uint
+	userUUID  string
 }
 
 func (s *containerShell) Execute(ctx context.Context, input *filesystem.ExecuteRequest) (*filesystem.ExecuteResponse, error) {
@@ -525,7 +534,7 @@ func (s *containerShell) Execute(ctx context.Context, input *filesystem.ExecuteR
 	if input.RunInBackendGround {
 		return nil, fmt.Errorf("background execution is not supported")
 	}
-	return s.manager.ExecInContainer(ctx, s.userRefID, input.Command)
+	return s.manager.ExecInContainer(ctx, s.userRefID, s.userUUID, input.Command)
 }
 
 func buildRuntimeInfo(runtime *model.DeepAgentRuntime) *RuntimeInfo {
@@ -549,8 +558,4 @@ func formatTime(value *time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339)
-}
-
-func filepathAbs(path string) (string, error) {
-	return filepath.Abs(path)
 }

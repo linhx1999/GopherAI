@@ -32,6 +32,7 @@ func GenerateHandler(c *gin.Context) {
 	result, code_ := agentService.DeepGenerate(
 		c.Request.Context(),
 		c.GetUint("userID"),
+		c.GetString("userUUID"),
 		req.SessionID,
 		req.Message,
 		req.Tools,
@@ -71,6 +72,7 @@ func StreamHandler(c *gin.Context) {
 	stream, code_ := agentService.DeepStream(
 		c.Request.Context(),
 		c.GetUint("userID"),
+		c.GetString("userUUID"),
 		req.SessionID,
 		req.Message,
 		req.Tools,
@@ -86,7 +88,7 @@ func StreamHandler(c *gin.Context) {
 }
 
 func GetRuntime(c *gin.Context) {
-	runtime, code_ := deepagentService.GetRuntimeStatus(c.Request.Context(), c.GetUint("userID"))
+	runtime, code_ := deepagentService.GetRuntimeStatus(c.Request.Context(), c.GetUint("userID"), c.GetString("userUUID"))
 	if code_ != code.CodeSuccess {
 		writeCodeResponse(c, code_)
 		return
@@ -100,7 +102,7 @@ func GetRuntime(c *gin.Context) {
 }
 
 func RestartRuntime(c *gin.Context) {
-	runtime, code_ := deepagentService.RestartRuntime(c.Request.Context(), c.GetUint("userID"))
+	runtime, code_ := deepagentService.RestartRuntime(c.Request.Context(), c.GetUint("userID"), c.GetString("userUUID"))
 	if code_ != code.CodeSuccess {
 		writeRuntimeResponse(c, code_, runtime)
 		return
@@ -109,7 +111,7 @@ func RestartRuntime(c *gin.Context) {
 }
 
 func RebuildRuntime(c *gin.Context) {
-	runtime, code_ := deepagentService.RebuildRuntime(c.Request.Context(), c.GetUint("userID"))
+	runtime, code_ := deepagentService.RebuildRuntime(c.Request.Context(), c.GetUint("userID"), c.GetString("userUUID"))
 	if code_ != code.CodeSuccess {
 		writeRuntimeResponse(c, code_, runtime)
 		return
