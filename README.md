@@ -89,7 +89,7 @@ pnpm dev
 - 前端识别“工具调用 assistant 消息”时，以 `response_meta.finish_reason=tool_calls` 为准；即使最终 assistant completed 仍携带历史 `tool_calls`，也必须继续渲染最终回答 bubble
 - 无工具但有 `reasoning_content` 的回答，也会显示单个 ThoughtChain 思考步骤；最终 assistant 完整消息仍保留为正文 bubble
 - 历史消息与流式消息共用同一套 ThoughtChain 聚合规则，刷新后步骤顺序、描述和工具结果展示应与流式过程保持一致
-- ThoughtChain 中的思考内容和工具结果内容都使用 `XMarkdown` 渲染，保持与正文 Markdown 一致的展示效果
+- ThoughtChain 中的思考内容、工具参数和工具结果内容都使用 `XMarkdown` 渲染；工具参数和工具结果会优先格式化为 Markdown 代码块展示
 - 聊天消息列表统一使用 `Bubble.List` 渲染；同一条 assistant 记录在前端会拆成 `ThoughtChain` 列表项和最终回答列表项
 - 自动下滑仅在用户当前接近底部时生效；用户手动上翻查看历史后，不会被流式增量或 ThoughtChain 新步骤强行拉回底部
 - 流式增长过程中通过 `Bubble.ListRef.scrollTo({ top: 'bottom', behavior: 'smooth' })` 跟随到底；当内容持续增长时，组件内部可能退化为 `instant` 以保证贴底

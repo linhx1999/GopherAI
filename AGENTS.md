@@ -146,7 +146,7 @@ type Message struct {
 - `role=tool` 的完整消息作为独立结果步骤挂到同一条 assistant 记录下；最终 assistant 完整消息才保留为正文 bubble
 - 仅携带 metadata 的空 assistant delta 不应单独渲染成气泡
 - 历史消息回放与流式过程共用同一套 ThoughtChain 聚合规则，刷新后应保持与流式阶段一致的步骤顺序和正文归属
-- ThoughtChain 中的思考内容和 `role=tool` 结果内容统一使用 `XMarkdown` 渲染
+- ThoughtChain 中的思考内容、工具调用参数和 `role=tool` 结果内容统一使用 `XMarkdown` 渲染；工具参数和工具结果都应优先格式化为 Markdown 代码块
 - 聊天消息列表统一使用 `Bubble.List` 渲染；同一条 assistant 记录在前端展示阶段会拆成 `thought_chain` 列表项和最终回答列表项
 - 列表滚动统一通过 `Bubble.ListRef.scrollTo` 控制；自动下滑只在用户当前接近底部且位于最后一页时生效
 - 当 `Bubble.List` 内容在持续增长时，`scrollTo({ top: 'bottom', behavior: 'smooth' })` 可能被组件内部兼容逻辑退化为 `instant`，以保证列表继续贴底

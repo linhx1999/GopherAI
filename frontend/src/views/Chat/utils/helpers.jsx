@@ -132,13 +132,30 @@ export const normalizeEnabledToolAPINames = (toolAPINames) => (
     : []
 )
 
-export const formatToolArguments = (argumentsText) => {
-  if (!argumentsText) return ''
-  try {
-    return JSON.stringify(JSON.parse(argumentsText), null, 2)
-  } catch {
-    return argumentsText
+const formatToolCodeBlockMarkdown = (content) => {
+  if (!content) {
+    return ''
   }
+
+  let formattedContent = content
+  let language = ''
+
+  try {
+    formattedContent = JSON.stringify(JSON.parse(content), null, 2)
+    language = 'json'
+  } catch {
+    formattedContent = content
+  }
+
+  return `\`\`\`${language}\n${formattedContent}\n\`\`\``
+}
+
+export const formatToolArgumentsMarkdown = (argumentsText) => {
+  return formatToolCodeBlockMarkdown(argumentsText)
+}
+
+export const formatToolResultMarkdown = (resultText) => {
+  return formatToolCodeBlockMarkdown(resultText)
 }
 
 export const createToolDisplayNameMap = (toolCatalog = []) => {
@@ -242,7 +259,7 @@ const buildToolCallItems = ({ record, traceRecord, traceIndex = 0, toolDisplayNa
 
   return toolCalls.map((call, index) => {
     const toolName = call.function?.name || call.id || `tool-${index + 1}`
-    const formattedArguments = formatToolArguments(call.function?.arguments)
+    const formattedArgumentsMarkdown = formatToolArgumentsMarkdown(call.function?.arguments)
     const traceDescription = getThoughtChainDescription(
       traceRecord.traceDescription || (traceIndex === 0 ? record?.planningMessage : null)
     )
@@ -252,11 +269,13 @@ const buildToolCallItems = ({ record, traceRecord, traceIndex = 0, toolDisplayNa
       title: getToolDisplayName(toolName, toolDisplayNames),
       description: status === TOOL_TRACE_STATUS.ERROR
         ? (traceDescription || '工具调用失败')
-        : (traceDescription || (formattedArguments ? '参数已准备' : '等待工具执行')),
-      content: formattedArguments ? (
-        <pre className="thought-chain-code-block">{formattedArguments}</pre>
+        : (traceDescription || (formattedArgumentsMarkdown ? '参数已准备' : '等待工具执行')),
+      content: formattedArgumentsMarkdown ? (
+        <div className="thought-chain-markdown">
+          {renderMarkdown(formattedArgumentsMarkdown)}
+        </div>
       ) : null,
-      collapsible: Boolean(formattedArguments),
+      collapsible: Boolean(formattedArgumentsMarkdown),
       status,
       blink: status === TOOL_TRACE_STATUS.LOADING
     }
@@ -272,6 +291,7 @@ const buildToolResultItems = (record, index = 0, toolDisplayNames = DEFAULT_TOOL
   const status = getTraceStatus(record)
   const toolName = message.tool_name || message.name || `tool-result-${index + 1}`
   const content = message.content || ''
+  const formattedResultMarkdown = formatToolResultMarkdown(content)
 
   return [{
     key: `${record.key}-result`,
@@ -279,12 +299,12 @@ const buildToolResultItems = (record, index = 0, toolDisplayNames = DEFAULT_TOOL
     description: status === TOOL_TRACE_STATUS.ERROR
       ? '工具执行失败'
       : (content ? '工具返回了可展示内容' : '工具已完成执行'),
-    content: content ? (
+    content: formattedResultMarkdown ? (
       <div className="thought-chain-markdown">
-        {renderMarkdown(content)}
+        {renderMarkdown(formattedResultMarkdown)}
       </div>
     ) : null,
-    collapsible: Boolean(content),
+    collapsible: Boolean(formattedResultMarkdown),
     status,
     blink: status === TOOL_TRACE_STATUS.LOADING
   }]

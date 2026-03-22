@@ -124,16 +124,6 @@
   box-shadow: none !important;
 }
 
-.thought-chain-code-block {
-  margin: 0;
-  padding: 12px;
-  background: rgba(15, 23, 42, 0.05);
-  border-radius: 12px;
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 .thought-chain-markdown {
   padding: 12px;
   border-radius: 12px;
@@ -146,6 +136,16 @@
 
 .thought-chain-markdown > :last-child {
   margin-bottom: 0;
+}
+
+.thought-chain-markdown pre {
+  margin: 0;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 @media (max-width: 768px) {
