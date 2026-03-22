@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { App } from 'antd'
 import api, { API_BASE_URL } from '../../../utils/api'
+import { getStoredToken, handleUnauthorized, isUnauthorizedResponseCode } from '../../../utils/auth'
 import useToolCatalog from './useToolCatalog'
 import {
   ASSISTANT_DISPLAY_MODES,
@@ -578,10 +579,28 @@ const useChat = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          'Authorization': `Bearer ${getStoredToken() || ''}`
         },
         body: JSON.stringify(payload)
       })
+
+      if (response.status === 401) {
+        finalizeStream()
+        handleUnauthorized()
+        return
+      }
+
+      const responseContentType = response.headers.get('content-type') || ''
+      if (responseContentType.includes('application/json')) {
+        const responseData = await response.json()
+        if (isUnauthorizedResponseCode(responseData?.code)) {
+          finalizeStream()
+          handleUnauthorized()
+          return
+        }
+
+        throw new Error(responseData?.msg || `HTTP error! status: ${response.status}`)
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)

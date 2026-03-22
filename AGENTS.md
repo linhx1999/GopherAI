@@ -144,6 +144,7 @@ type Message struct {
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
 - 首轮请求若未携带 `session_id`，前端在拿到服务端返回的真实会话 ID 后要立即更新 `activeKey`，保证后续续聊复用同一会话
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
+- 前端统一以服务端 `401` 或业务响应码 `2006` / `2007` 作为 token 失效判定；axios 响应拦截器与聊天页流式 `fetch` 都必须复用同一个未授权处理函数，清理本地 token 后跳转 `/login`
 
 ### 4. RAG 与文件流程
 

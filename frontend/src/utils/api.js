@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getStoredToken, handleUnauthorized, isUnauthorizedResponseCode } from './auth'
 
 export const API_BASE_URL = '/api/v1'
 
@@ -10,7 +11,7 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token')
+    const token = getStoredToken()
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -24,12 +25,15 @@ api.interceptors.request.use(
 // 响应拦截器
 api.interceptors.response.use(
   (response) => {
+    if (isUnauthorizedResponseCode(response.data?.code)) {
+      handleUnauthorized()
+      return Promise.reject(new Error(response.data?.msg || '登录已失效'))
+    }
     return response
   },
   (error) => {
     if (error.response && error.response.status === 401) {
-      localStorage.removeItem('token')
-      window.location.href = '/login'
+      handleUnauthorized()
     }
     return Promise.reject(error)
   }

@@ -79,6 +79,7 @@ pnpm dev
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 - 流式工具调用按“单轮回答”聚合展示：assistant 文本先正常流式显示；当后续收到 `finish_reason=tool_calls` 时，前面累积的文本会被回收为对应工具步骤的 `description`，步骤 `title` 使用工具 API 名称，`role=tool` 继续作为独立结果项；只有最终 `finish_reason=stop` 前累积的最新文本会保留在正文 bubble 中，纯 finish metadata 的空 chunk 不会单独渲染
 - ThoughtChain 中的工具结果内容使用 `XMarkdown` 渲染，保持与正文 Markdown 一致的展示效果
+- 前端统一以服务端 `401` 或业务响应码 `2006` / `2007` 作为 token 失效判定；普通 axios 请求与流式 `fetch` 请求都会清理本地 token 并自动跳转 `/login`
 - 前端基于 Ant Design 6 开发时，优先使用 `variant`、`orientation` 等新属性，避免继续使用 `bordered`、`direction` 这类已弃用 API
 
 ## 标识模型说明
