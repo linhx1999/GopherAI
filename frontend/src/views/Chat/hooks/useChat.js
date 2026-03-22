@@ -26,6 +26,18 @@ const MESSAGE_RENDER_MODE = {
   STREAM: 'stream'
 }
 
+const parseSessionItem = (session) => {
+  if (!session?.sessionId) {
+    return null
+  }
+
+  return {
+    id: String(session.sessionId),
+    title: session.title || `会话 ${session.sessionId}`,
+    createdAt: session.createdAt || null
+  }
+}
+
 const parseSessionListResponse = (responseData) => {
   const sessionList = responseData?.data?.sessions
   if (!Array.isArray(sessionList)) {
@@ -33,11 +45,8 @@ const parseSessionListResponse = (responseData) => {
   }
 
   return sessionList
-    .map((session) => ({
-      id: String(session.sessionId),
-      title: session.title || `会话 ${session.sessionId}`,
-      createdAt: session.createdAt || null
-    }))
+    .map(parseSessionItem)
+    .filter(Boolean)
     .sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0))
 }
 
@@ -93,18 +102,18 @@ const hasVisibleAssistantContent = (message = {}) => Boolean(
   String(message?.content || '').trim() || String(message?.reasoning_content || '').trim()
 )
 
-    const createToolTraceRecord = ({
-      index,
-      chunk,
-      traceDescription = null,
-      pending = chunk?.role === MESSAGE_ROLES.TOOL ? false : !isMessageFinished(chunk)
-    }) => createRecord({
-      index,
-      message: mergeSchemaMessageChunk({}, chunk),
-      pending,
-      renderMode: MESSAGE_RENDER_MODE.STREAM,
-      traceDescription
-    })
+const createToolTraceRecord = ({
+  index,
+  chunk,
+  traceDescription = null,
+  pending = chunk?.role === MESSAGE_ROLES.TOOL ? false : !isMessageFinished(chunk)
+}) => createRecord({
+  index,
+  message: mergeSchemaMessageChunk({}, chunk),
+  pending,
+  renderMode: MESSAGE_RENDER_MODE.STREAM,
+  traceDescription
+})
 
 const settleRecord = (record) => ({
   ...record,
@@ -310,30 +319,41 @@ const useChat = () => {
     }
   }, [sessions, shareSession, deleteSession])
 
-  const bindServerSession = useCallback((sessionId) => {
+  const bindServerSession = useCallback((sessionId, sessionPatch = {}) => {
     const newSid = String(sessionId)
     const shouldBindActiveSession = !activeKeyRef.current || isTempSessionRef.current
+    const nextSession = {
+      id: newSid,
+      title: sessionPatch.title || `会话 ${newSid}`,
+      createdAt: sessionPatch.createdAt || new Date().toISOString()
+    }
 
     setSessions((prev) => {
       const nextSessions = prev.map((session) => (
         shouldBindActiveSession && session.id === SPECIAL_SESSIONS.TEMP
-          ? { ...session, id: newSid }
+          ? { ...session, ...nextSession }
           : session
       ))
 
-      if (nextSessions.some((session) => session.id === newSid)) {
-        return nextSessions
+      const existingIndex = nextSessions.findIndex((session) => session.id === newSid)
+      if (existingIndex >= 0) {
+        if (!sessionPatch.title && !sessionPatch.createdAt) {
+          return nextSessions
+        }
+
+        const mergedSessions = [...nextSessions]
+        mergedSessions[existingIndex] = {
+          ...mergedSessions[existingIndex],
+          ...sessionPatch
+        }
+        return mergedSessions
       }
 
       if (!shouldBindActiveSession) {
         return prev
       }
 
-      return [{
-        id: newSid,
-        title: `会话 ${newSid}`,
-        createdAt: new Date().toISOString()
-      }, ...nextSessions]
+      return [nextSession, ...nextSessions]
     })
 
     if (shouldBindActiveSession) {
@@ -342,31 +362,45 @@ const useChat = () => {
     }
 
     latestHistorySessionRef.current = newSid
-    loadSessions()
-  }, [loadSessions])
+  }, [])
+
+  const createServerSession = useCallback(async () => {
+    const response = await api.post(API_ENDPOINTS.SESSIONS)
+    if (response.data?.code !== STATUS_CODES.SUCCESS) {
+      throw new Error(response.data?.msg || '创建会话失败')
+    }
+
+    const createdSession = parseSessionItem(response.data?.data?.session)
+    if (!createdSession) {
+      throw new Error('创建会话失败')
+    }
+
+    bindServerSession(createdSession.id, createdSession)
+    return createdSession
+  }, [bindServerSession])
 
   const buildChatRunOptions = useCallback(() => ({
     enabledToolAPINames: normalizeEnabledToolAPINames(enabledToolAPINames),
     thinkingModeEnabled: thinkingMode
   }), [enabledToolAPINames, thinkingMode])
 
-  const buildChatRequest = useCallback((question, runOptions) => {
+  const buildChatRequest = useCallback((question, runOptions, sessionIdOverride = null) => {
     const payload = {
       message: question,
       tools: runOptions.enabledToolAPINames,
       thinking_mode: runOptions.thinkingModeEnabled,
     }
 
-    if (activeKey && !isTempSession) {
-      payload.session_id = activeKey
+    const targetSessionId = sessionIdOverride ?? ((activeKey && !isTempSession) ? activeKey : null)
+    if (targetSessionId) {
+      payload.session_id = targetSessionId
     }
     return payload
   }, [activeKey, isTempSession])
 
   const sendStreamMessage = useCallback(async (question, runOptions) => {
     const url = `${API_BASE_URL}/${API_ENDPOINTS.AGENT_STREAM}`
-    const payload = buildChatRequest(question, runOptions)
-
+    let didCreateSession = false
     let nextMessageIndex = null
     let activeMessageKey = null
     let activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
@@ -575,6 +609,14 @@ const useChat = () => {
     }
 
     try {
+      let sessionId = activeKey && !isTempSession ? activeKey : null
+      if (!sessionId) {
+        const createdSession = await createServerSession()
+        sessionId = createdSession.id
+        didCreateSession = true
+      }
+
+      const payload = buildChatRequest(question, runOptions, sessionId)
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -633,9 +675,6 @@ const useChat = () => {
 
           const payload = parsed.data
           if (payload?.type === SSE_EVENT_TYPES.META) {
-            if (payload.session_id) {
-              bindServerSession(String(payload.session_id))
-            }
             if (typeof payload.message_index === 'number') {
               nextMessageIndex = payload.message_index
             }
@@ -739,8 +778,12 @@ const useChat = () => {
       console.error('Stream error:', err)
       finalizeStream()
       message.error('流式传输出错: ' + err.message)
+    } finally {
+      if (didCreateSession) {
+        loadSessions()
+      }
     }
-  }, [bindServerSession, buildChatRequest, message])
+  }, [activeKey, buildChatRequest, createServerSession, isTempSession, loadSessions, message])
 
   const sendGenerateMessage = useCallback(async (question, runOptions) => {
     const payload = buildChatRequest(question, runOptions)

@@ -14,6 +14,25 @@ type UpdateSessionTitleRequest struct {
 	Title string `json:"title" binding:"required"`
 }
 
+func CreateSession(c *gin.Context) {
+	userID := c.GetUint("userID")
+
+	createdSession, code_ := sessionService.CreateSession(userID)
+	if code_ != code.CodeSuccess {
+		c.JSON(http.StatusOK, controller.Response{
+			Code: code_,
+			Msg:  code_.Msg(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, controller.Response{
+		Code: code.CodeSuccess,
+		Msg:  code.CodeSuccess.Msg(),
+		Data: gin.H{"session": createdSession},
+	})
+}
+
 func GetUserSessionsByUserName(c *gin.Context) {
 	userID := c.GetUint("userID")
 

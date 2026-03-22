@@ -4,11 +4,21 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
+
 	"GopherAI/common/code"
 	messageDAO "GopherAI/dao/message"
 	"GopherAI/dao/session"
 	"GopherAI/model"
 )
+
+func buildSessionInfo(s model.Session) model.SessionInfo {
+	return model.SessionInfo{
+		SessionID: s.SessionID,
+		Title:     s.Title,
+		CreatedAt: s.CreatedAt.Format(time.RFC3339),
+	}
+}
 
 // GetUserSessionsByUserRefID 获取用户会话列表
 func GetUserSessionsByUserRefID(userRefID uint) ([]model.SessionInfo, error) {
@@ -20,14 +30,28 @@ func GetUserSessionsByUserRefID(userRefID uint) ([]model.SessionInfo, error) {
 
 	sessionInfos := make([]model.SessionInfo, 0, len(sessions))
 	for _, s := range sessions {
-		sessionInfos = append(sessionInfos, model.SessionInfo{
-			SessionID: s.SessionID,
-			Title:     s.Title,
-			CreatedAt: s.CreatedAt.Format(time.RFC3339),
-		})
+		sessionInfos = append(sessionInfos, buildSessionInfo(s))
 	}
 
 	return sessionInfos, nil
+}
+
+// CreateSession 创建空会话
+func CreateSession(userRefID uint) (*model.SessionInfo, code.Code) {
+	newSession := &model.Session{
+		SessionID: uuid.New().String(),
+		UserRefID: userRefID,
+		Title:     model.DefaultSessionTitle,
+	}
+
+	createdSession, err := session.CreateSession(newSession)
+	if err != nil {
+		log.Println("CreateSession error:", err)
+		return nil, code.CodeServerBusy
+	}
+
+	sessionInfo := buildSessionInfo(*createdSession)
+	return &sessionInfo, code.CodeSuccess
 }
 
 // DeleteSession 删除会话

@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"gorm.io/gorm"
 
+	"GopherAI/common/code"
 	"GopherAI/model"
 )
 
@@ -128,5 +129,26 @@ func TestIsRequestCanceledDetectsCancellationText(t *testing.T) {
 	err := errors.New("[NodeRunError] failed to create chat completion: Post \"https://example.com\": context canceled")
 	if !isRequestCanceled(context.Background(), err) {
 		t.Fatal("expected cancellation text to be detected")
+	}
+}
+
+func TestResolveExecutionSessionRejectsMissingSessionWhenCreationDisabled(t *testing.T) {
+	session, code_ := resolveExecutionSession(1, "", "你好", false)
+	if session != nil {
+		t.Fatalf("expected nil session, got %#v", session)
+	}
+	if code_ != code.CodeInvalidParams {
+		t.Fatalf("expected invalid params code, got %d", code_)
+	}
+}
+
+func TestSyncSessionTitleWithFirstMessageSkipsNonPlaceholderSession(t *testing.T) {
+	session := &model.Session{Title: "已有标题"}
+	code_ := syncSessionTitleWithFirstMessage(session, 1, nil, "新的首条消息")
+	if code_ != code.CodeSuccess {
+		t.Fatalf("expected success code, got %d", code_)
+	}
+	if session.Title != "已有标题" {
+		t.Fatalf("expected title to stay unchanged, got %q", session.Title)
 	}
 }

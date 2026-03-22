@@ -32,7 +32,6 @@ const (
 
 type StreamMeta struct {
 	Type         string `json:"type"`
-	SessionID    string `json:"session_id"`
 	MessageIndex int    `json:"message_index"`
 }
 
@@ -245,6 +244,28 @@ func buildHistoryMessageItems(msgs []*model.Message) []HistoryMessageItem {
 	return items
 }
 
+func syncSessionTitleWithFirstMessage(session *model.Session, userRefID uint, history []*model.Message, userMessage string) code.Code {
+	if session == nil || len(history) > 0 || session.Title != model.DefaultSessionTitle {
+		return code.CodeSuccess
+	}
+
+	title := strings.TrimSpace(userMessage)
+	if title == "" {
+		return code.CodeSuccess
+	}
+
+	updated, err := sessionDAO.UpdateSessionTitleBySessionIDAndUserRefID(session.SessionID, userRefID, title)
+	if err != nil {
+		log.Println("syncSessionTitleWithFirstMessage error:", err)
+		return code.CodeServerBusy
+	}
+	if updated {
+		session.Title = title
+	}
+
+	return code.CodeSuccess
+}
+
 func createSession(userRefID uint, title string) (*model.Session, code.Code) {
 	newSession := &model.Session{
 		SessionID: uuid.New().String(),
@@ -259,12 +280,24 @@ func createSession(userRefID uint, title string) (*model.Session, code.Code) {
 	return createdSession, code.CodeSuccess
 }
 
+func resolveExecutionSession(userRefID uint, sessionID, userMessage string, allowCreateSession bool) (*model.Session, code.Code) {
+	if sessionID == "" {
+		if !allowCreateSession {
+			return nil, code.CodeInvalidParams
+		}
+		return createSession(userRefID, userMessage)
+	}
+
+	return checkOwnedSession(sessionID, userRefID)
+}
+
 func prepareChatExecution(
 	ctx context.Context,
 	userRefID uint,
 	sessionID, userMessage string,
 	enabledToolNames []string,
 	thinkingMode bool,
+	allowCreateSession bool,
 ) (*preparedChatExecution, code.Code) {
 	normalizedToolNames := agenttools.NormalizeToolNames(enabledToolNames)
 	hasEnabledTools := len(normalizedToolNames) > 0
@@ -284,27 +317,18 @@ func prepareChatExecution(
 		return nil, code.AIModelFail
 	}
 
-	var (
-		session *model.Session
-		code_   code.Code
-	)
-
-	if sessionID == "" {
-		session, code_ = createSession(userRefID, userMessage)
-		if code_ != code.CodeSuccess {
-			return nil, code_
-		}
-	} else {
-		session, code_ = checkOwnedSession(sessionID, userRefID)
-		if code_ != code.CodeSuccess {
-			return nil, code_
-		}
+	session, code_ := resolveExecutionSession(userRefID, sessionID, userMessage, allowCreateSession)
+	if code_ != code.CodeSuccess {
+		return nil, code_
 	}
 
 	history, err := loadSessionHistory(session, userRefID)
 	if err != nil {
 		log.Println("prepareChatExecution loadSessionHistory error:", err)
 		return nil, code.CodeServerBusy
+	}
+	if code_ := syncSessionTitleWithFirstMessage(session, userRefID, history, userMessage); code_ != code.CodeSuccess {
+		return nil, code_
 	}
 
 	userMessageIndex := len(history)
@@ -322,7 +346,7 @@ func prepareChatExecution(
 
 // Generate 同步生成响应。
 func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode)
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode, true)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -360,7 +384,7 @@ func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
 func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode)
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode, false)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -372,7 +396,6 @@ func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, 
 		if err := emitEvent(ctx, events, StreamEvent{
 			Meta: &StreamMeta{
 				Type:         StreamPayloadTypeMeta,
-				SessionID:    run.session.SessionID,
 				MessageIndex: run.firstAssistantMessageIndex,
 			},
 		}); err != nil {

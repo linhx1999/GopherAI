@@ -41,7 +41,6 @@ func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	streamSSE(c, oneShotSSEStream(agentService.StreamEvent{
 		Meta: &agentService.StreamMeta{
 			Type:         agentService.StreamPayloadTypeMeta,
-			SessionID:    "sess_1",
 			MessageIndex: 1,
 		},
 	}))
@@ -53,8 +52,11 @@ func TestStreamLoopUsesGinSSEventAndDoneMarker(t *testing.T) {
 	if !strings.Contains(body, `"type":"meta"`) {
 		t.Fatalf("expected meta payload, got %q", body)
 	}
-	if !strings.Contains(body, `"session_id":"sess_1"`) {
-		t.Fatalf("expected session_id in payload, got %q", body)
+	if strings.Contains(body, `"session_id":"sess_1"`) {
+		t.Fatalf("did not expect session_id in payload, got %q", body)
+	}
+	if !strings.Contains(body, `"message_index":1`) {
+		t.Fatalf("expected message_index in payload, got %q", body)
 	}
 	if !strings.Contains(body, "data:[DONE]") {
 		t.Fatalf("expected done marker, got %q", body)
@@ -101,6 +103,28 @@ func TestStreamHandlerReturnsErrorEventWhenMessageMissing(t *testing.T) {
 	}
 	if !strings.Contains(body, `"message":"Key: 'ChatRequest.Message' Error:Field validation for 'Message' failed on the 'required' tag"`) {
 		t.Fatalf("expected validation error message, got %q", body)
+	}
+	if !strings.Contains(body, "data:[DONE]") {
+		t.Fatalf("expected done marker, got %q", body)
+	}
+}
+
+func TestStreamHandlerReturnsErrorEventWhenSessionIDMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := newCloseNotifyRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/stream", bytes.NewBufferString(`{"message":"你好"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	StreamHandler(c)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"type":"error"`) {
+		t.Fatalf("expected error payload, got %q", body)
+	}
+	if !strings.Contains(body, `"message":"session_id is required"`) {
+		t.Fatalf("expected session_id required message, got %q", body)
 	}
 	if !strings.Contains(body, "data:[DONE]") {
 		t.Fatalf("expected done marker, got %q", body)

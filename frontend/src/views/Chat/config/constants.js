@@ -52,7 +52,7 @@ export const API_ENDPOINTS = {
   TOOLS: 'tools',                                      // GET: 获取工具列表
 
   // 会话接口
-  SESSIONS: 'sessions',                                // GET: 获取会话列表
+  SESSIONS: 'sessions',                                // GET: 获取会话列表 / POST: 创建会话
   SESSION_TITLE: (sessionId) => `sessions/${sessionId}/title`, // PUT: 更新标题
   SESSION_DELETE: (sessionId) => `sessions/${sessionId}`,      // DELETE: 删除会话
 

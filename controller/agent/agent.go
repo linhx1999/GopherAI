@@ -17,7 +17,7 @@ const ginSSEEventName = "message"
 
 // ChatRequest 表示生成类接口的共享请求体。
 type ChatRequest struct {
-	SessionID    string   `json:"session_id"`                 // 可选，为空则创建新会话
+	SessionID    string   `json:"session_id"`                 // 流式接口必填，非流式接口可选
 	Message      string   `json:"message" binding:"required"` // 必填，用户消息内容
 	Tools        []string `json:"tools"`                      // 可选，工具 API 调用名列表
 	ThinkingMode bool     `json:"thinking_mode"`              // 可选，是否启用思考模型
@@ -65,6 +65,11 @@ func StreamHandler(c *gin.Context) {
 	if err != nil {
 		setSSEHeaders(c)
 		streamSSE(c, errorEventStream(code.CodeInvalidParams, err.Error()))
+		return
+	}
+	if req.SessionID == "" {
+		setSSEHeaders(c)
+		streamSSE(c, errorEventStream(code.CodeInvalidParams, "session_id is required"))
 		return
 	}
 

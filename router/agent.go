@@ -29,6 +29,9 @@ func SetupAgentRoutes(r *gin.RouterGroup) {
 
 	sessions := r.Group("/sessions")
 	{
+		// POST /api/v1/sessions - 创建会话
+		sessions.POST("", sessionController.CreateSession)
+
 		// GET /api/v1/sessions - 获取会话列表
 		sessions.GET("", sessionController.GetUserSessionsByUserName)
 

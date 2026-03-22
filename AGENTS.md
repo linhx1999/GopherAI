@@ -104,7 +104,7 @@ GopherAI/
 - Redis 与 RabbitMQ 载荷都保留 `index`、`payload`、`tool_calls`
 - 历史消息读取遵循“Redis 优先，PostgreSQL 回源”，以兼容“Redis 同步写、PostgreSQL 异步落库”的消息链路
 - Redis 访问通过领域 DAO 收口；service 负责缓存策略，不直接调用 `common/redis` 的业务函数
-- 前端在收到流式 `meta.session_id` 或非流式响应里的 `session_id` 后，必须立刻把当前聊天上下文绑定到该真实会话，避免后续多轮对话重复创建会话
+- 流式首轮请求改为先调用 `POST /api/v1/sessions` 获取真实会话，再调用 `POST /api/v1/agent/stream`；SSE `meta` 不再下发 `session_id`
 - 若 HTTP 请求上下文已取消，service/controller 应将其视为请求中断并停止写回，避免把客户端断开误记为模型失败
 
 消息模型关键字段：
@@ -142,7 +142,8 @@ type Message struct {
 - ThoughtChain 中 `role=tool` 的结果内容统一使用 `XMarkdown` 渲染
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
-- 首轮请求若未携带 `session_id`，前端在拿到服务端返回的真实会话 ID 后要立即更新 `activeKey`，保证后续续聊复用同一会话
+- 点击“新建会话”仍只创建本地临时会话；首轮流式发送前前端必须先调用 `POST /api/v1/sessions`，拿到真实 `sessionId` 后再更新 `activeKey` 并发起 `/agent/stream`
+- `/agent/stream` 的 SSE `meta` 仅用于 `message_index` 等控制信息，不再承担回传 `session_id` 的职责
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
 - 前端统一以服务端 `401` 或业务响应码 `2006` / `2007` 作为 token 失效判定；axios 响应拦截器与聊天页流式 `fetch` 都必须复用同一个未授权处理函数，清理本地 token 后跳转 `/login`
 
@@ -174,6 +175,7 @@ type Message struct {
 | POST | `/api/v1/agent/stream` | SSE 流式生成 |
 | GET | `/api/v1/agent/:session_id/messages` | 会话消息 |
 | GET | `/api/v1/tools` | 工具列表 |
+| POST | `/api/v1/sessions` | 创建会话 |
 | GET | `/api/v1/sessions` | 会话列表 |
 | DELETE | `/api/v1/sessions/:session_id` | 删除会话 |
 | PUT | `/api/v1/sessions/:session_id/title` | 更新标题 |
@@ -192,8 +194,10 @@ type Message struct {
 - `service/agent` 的生成与流式入口共享同一套显式参数准备逻辑，不再额外定义内部请求 DTO
 - system prompt 通过 ADK `ChatModelAgentConfig.Instruction` 注入；会话消息数组只包含历史消息和当前用户消息
 - SSE `data` 直接传 `schema.Message` JSON，不再拆分自定义 delta 事件
+- `/agent/stream` 必须携带已有 `session_id`；缺失时直接返回参数错误 SSE 事件
 - 历史消息接口只允许读取当前用户自己的会话；前端直接读取 `response.data.data.messages`
 - 会话列表接口只返回当前用户会话；前端直接读取 `response.data.data.sessions`
+- 创建会话接口返回 `response.data.data.session`，结构与会话列表项一致：`sessionId` / `title` / `createdAt`
 - 历史消息项新增 `message_id`；文件列表与文件操作统一使用 `file_id`
 
 ## 配置说明

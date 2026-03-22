@@ -4,6 +4,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const DefaultSessionTitle = "新会话"
+
 // Session 会话模型
 type Session struct {
 	gorm.Model

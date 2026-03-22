@@ -74,7 +74,9 @@ pnpm dev
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequential_thinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
 - `POST /api/v1/agent/*` 收到未知工具名时会直接返回请求参数错误，且不会创建会话、写入消息或触发模型调用
 - 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
-- 首轮请求未携带 `session_id` 时，前端会在收到服务端返回的真实 `session_id` 后立即绑定当前会话，后续流式与非流式多轮对话都复用同一会话
+- 流式首轮对话改为“先 `POST /api/v1/sessions` 创建会话，再 `POST /api/v1/agent/stream` 拉取智能体输出”；`/agent/stream` 必须携带已有 `session_id`
+- 流式 SSE `meta` 只保留 `message_index` 等控制信息，不再回传 `session_id`
+- 非流式首轮对话仍可不传 `session_id`，由 `/agent/generate` 继续沿用现有隐式建会话逻辑
 - 当客户端主动断开、页面刷新或请求上下文取消时，流式与非流式接口都会将其视为请求终止，不再记录为模型调用失败
 - 非流式对话成功后，前端优先回查历史；若当前轮 assistant 尚未完成数据库异步落盘，则直接使用 `/agent/generate` 返回的 `message` 兜底展示
 - 流式工具调用按“单轮回答”聚合展示：assistant 文本先正常流式显示；当后续收到 `finish_reason=tool_calls` 时，前面累积的文本会被回收为对应工具步骤的 `description`，步骤 `title` 使用工具 API 名称，`role=tool` 继续作为独立结果项；只有最终 `finish_reason=stop` 前累积的最新文本会保留在正文 bubble 中，纯 finish metadata 的空 chunk 不会单独渲染
@@ -94,7 +96,7 @@ pnpm dev
 ### SSE 示例
 
 ```text
-data: {"type":"meta","session_id":"sess_001","message_index":4}
+data: {"type":"meta","message_index":4}
 data: {"role":"assistant","reasoning_content":"先确认约束"}
 data: {"role":"assistant","content":"答案","response_meta":{"finish_reason":"stop"}}
 data: [DONE]
@@ -121,6 +123,7 @@ data: [DONE]
 | POST | `/api/v1/agent/stream` | SSE 流式对话 |
 | GET | `/api/v1/agent/:session_id/messages` | 会话消息 |
 | GET | `/api/v1/tools` | 工具列表 |
+| POST | `/api/v1/sessions` | 创建会话 |
 | GET | `/api/v1/sessions` | 会话列表 |
 | DELETE | `/api/v1/sessions/:session_id` | 删除会话 |
 | PUT | `/api/v1/sessions/:session_id/title` | 更新标题 |
