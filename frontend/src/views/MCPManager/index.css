@@ -1,0 +1,267 @@
+.mcp-manager-layout {
+  min-height: 100vh;
+}
+
+.mcp-manager-content {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-manager-toolbar {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mcp-manager-toolbar-copy {
+  margin-left: auto;
+  text-align: right;
+}
+
+.mcp-manager-toolbar-copy h1 {
+  margin: 4px 0;
+  font-size: 24px;
+  color: #0f766e;
+}
+
+.mcp-manager-toolbar-copy p {
+  margin: 0;
+  color: #6b7280;
+}
+
+.mcp-manager-eyebrow,
+.mcp-manager-panel-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mcp-manager-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 30px;
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 30%),
+    linear-gradient(180deg, #f4fbfb 0%, #eef6f7 100%);
+}
+
+.mcp-manager-panel {
+  max-width: 1440px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 24px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.mcp-manager-panel-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 24px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.mcp-manager-panel-copy {
+  max-width: 520px;
+}
+
+.mcp-manager-panel-copy h2 {
+  margin: 10px 0 8px;
+  font-size: 28px;
+  line-height: 1.15;
+  color: #111827;
+}
+
+.mcp-manager-panel-copy p {
+  margin: 0;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.mcp-manager-panel-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.mcp-manager-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.mcp-manager-stat-card {
+  min-width: 128px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.mcp-manager-stat-card strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.mcp-manager-stat-label {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.mcp-manager-table-panel {
+  padding: 8px 24px 24px;
+}
+
+.mcp-manager-table-panel .ant-table-container {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.mcp-manager-table-panel .ant-table-thead > tr > th {
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.95) 0%, rgba(236, 253, 245, 0.95) 100%);
+  color: #111827;
+  font-weight: 600;
+  padding: 16px;
+}
+
+.mcp-manager-table-panel .ant-table-tbody > tr > td {
+  padding: 14px 16px;
+}
+
+.mcp-manager-table-panel .ant-table-tbody > tr:hover > td {
+  background: rgba(15, 118, 110, 0.04);
+}
+
+.mcp-manager-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mcp-manager-name strong {
+  color: #111827;
+  font-size: 15px;
+}
+
+.mcp-manager-name span,
+.mcp-manager-endpoint,
+.mcp-manager-hint {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mcp-manager-tool-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.mcp-manager-tool-card {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(255, 255, 255, 1) 100%);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.mcp-manager-tool-card strong {
+  display: block;
+  color: #111827;
+}
+
+.mcp-manager-tool-card p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mcp-manager-drawer-section {
+  margin-top: 24px;
+}
+
+.mcp-manager-header-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1.6fr auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.mcp-manager-empty-state {
+  padding: 32px 0;
+  text-align: center;
+  color: #6b7280;
+}
+
+@media (max-width: 960px) {
+  .mcp-manager-toolbar-copy {
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .mcp-manager-panel-toolbar {
+    flex-direction: column;
+  }
+
+  .mcp-manager-panel-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .mcp-manager-stats {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 768px) {
+  .mcp-manager-toolbar {
+    padding: 16px;
+  }
+
+  .mcp-manager-shell {
+    padding: 18px 14px;
+  }
+
+  .mcp-manager-panel {
+    border-radius: 18px;
+  }
+
+  .mcp-manager-panel-toolbar,
+  .mcp-manager-table-panel {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .mcp-manager-header-row {
+    grid-template-columns: 1fr;
+  }
+}

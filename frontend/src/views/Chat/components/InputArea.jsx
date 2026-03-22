@@ -1,6 +1,7 @@
 import { useRef, useMemo } from 'react'
 import { Button, Checkbox, Dropdown, Flex } from 'antd'
 import {
+  ApiOutlined,
   CloudUploadOutlined,
   LinkOutlined,
   ToolOutlined,
@@ -29,7 +30,9 @@ const InputArea = ({
   inputValue,
   isLoading,
   availableTools,
+  availableMCPServers,
   enabledToolApiNames,
+  enabledMCPServerIDs,
   thinkingMode,
   isStreaming,
   attachments,
@@ -37,12 +40,30 @@ const InputArea = ({
   onInputChange,
   onSubmit,
   onEnabledToolApiNamesChange,
+  onEnabledMCPServerIDsChange,
   onThinkingModeChange,
   onStreamingChange,
   onAttachmentsChange,
   onAttachmentsOpenChange
 }) => {
   const senderRef = useRef(null)
+
+  const isServerSelectable = (server) => (
+    server?.lastTestStatus === 'success' && Array.isArray(server?.tools) && server.tools.length > 0
+  )
+
+  const getServerHint = (server) => {
+    if (!server) {
+      return ''
+    }
+    if (server.lastTestStatus !== 'success') {
+      return server.lastTestMessage || '请先在 MCP 管理页完成连接测试'
+    }
+    if (!server.tools?.length) {
+      return '该服务当前没有可用工具'
+    }
+    return `${server.tools.length} 个工具`
+  }
 
   // 附件区域头部
   const senderHeader = useMemo(() => (
@@ -172,6 +193,54 @@ const InputArea = ({
               >
                 <Switch value={enabledToolApiNames.length > 0} icon={<ToolOutlined />}>
                   工具 {enabledToolApiNames.length > 0 && `(${enabledToolApiNames.length})`}
+                </Switch>
+              </Dropdown>
+
+              <Dropdown
+                trigger={['click']}
+                popupRender={() => (
+                  <div style={{
+                    padding: 12,
+                    background: '#fff',
+                    borderRadius: 8,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                    minWidth: 240
+                  }}>
+                    <div style={{ marginBottom: 8, fontWeight: 500, color: '#666' }}>
+                      选择 MCP 服务
+                    </div>
+                    <Checkbox.Group
+                      value={enabledMCPServerIDs}
+                      onChange={onEnabledMCPServerIDsChange}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+                    >
+                      {availableMCPServers.map((server) => {
+                        const disabled = !isServerSelectable(server)
+                        return (
+                          <Checkbox key={server.serverId} value={server.serverId} disabled={disabled}>
+                            <Flex vertical gap={2}>
+                              <Flex align="center" gap={6}>
+                                <ApiOutlined />
+                                <span>{server.name}</span>
+                              </Flex>
+                              <span style={{ color: '#999', fontSize: 12 }}>
+                                {getServerHint(server)}
+                              </span>
+                            </Flex>
+                          </Checkbox>
+                        )
+                      })}
+                    </Checkbox.Group>
+                    {availableMCPServers.length === 0 ? (
+                      <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+                        当前没有已配置的 MCP 服务
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              >
+                <Switch value={enabledMCPServerIDs.length > 0} icon={<ApiOutlined />}>
+                  MCP {enabledMCPServerIDs.length > 0 && `(${enabledMCPServerIDs.length})`}
                 </Switch>
               </Dropdown>
 

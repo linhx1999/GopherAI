@@ -24,7 +24,10 @@ const Chat = () => {
   const {
     // 基础状态
     availableTools,
+    availableMCPServers,
+    mcpFeatureEnabled,
     enabledToolAPINames,
+    enabledMCPServerIDs,
     thinkingMode,
     isStreaming,
     currentPage,
@@ -50,6 +53,7 @@ const Chat = () => {
     handleBubbleListScroll,
     // 状态更新
     setEnabledToolAPINames,
+    setEnabledMCPServerIDs,
     setThinkingMode,
     setIsStreaming,
     setCurrentPage,
@@ -58,7 +62,10 @@ const Chat = () => {
     setAttachmentsOpen
   } = useChat()
 
-  const toolDisplayNames = useMemo(() => createToolDisplayNameMap(availableTools), [availableTools])
+  const toolDisplayNames = useMemo(() => createToolDisplayNameMap([
+    ...availableTools,
+    ...availableMCPServers.flatMap((server) => server.tools || [])
+  ]), [availableMCPServers, availableTools])
 
   return (
     <Layout style={style}>
@@ -93,7 +100,9 @@ const Chat = () => {
           inputValue={inputValue}
           isLoading={isLoading}
           availableTools={availableTools}
+          availableMCPServers={mcpFeatureEnabled ? availableMCPServers : []}
           enabledToolApiNames={enabledToolAPINames}
+          enabledMCPServerIDs={enabledMCPServerIDs}
           thinkingMode={thinkingMode}
           isStreaming={isStreaming}
           attachments={attachments}
@@ -101,6 +110,7 @@ const Chat = () => {
           onInputChange={setInputValue}
           onSubmit={handleSend}
           onEnabledToolApiNamesChange={setEnabledToolAPINames}
+          onEnabledMCPServerIDsChange={setEnabledMCPServerIDs}
           onThinkingModeChange={setThinkingMode}
           onStreamingChange={setIsStreaming}
           onAttachmentsChange={setAttachments}

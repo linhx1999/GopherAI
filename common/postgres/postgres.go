@@ -71,6 +71,7 @@ func InitPostgres() error {
 		new(model.File),
 		new(model.DocumentChunk),
 		new(model.Message),
+		new(model.MCPServer),
 	)
 }
 
@@ -136,6 +137,7 @@ func resetLegacyTables() error {
 		"files":           {"id", "file_id", "user_ref_id"},
 		"document_chunks": {"id", "chunk_id", "file_ref_id"},
 		"messages":        {"id", "message_id", "session_ref_id", "user_ref_id"},
+		"mcp_servers":     {"id", "mcp_server_id", "user_ref_id"},
 	}
 
 	for table, columns := range tableColumns {
@@ -155,7 +157,7 @@ func resetLegacyTables() error {
 }
 
 func dropIdentityTables() error {
-	tables := []string{"messages", "document_chunks", "files", "sessions", "users"}
+	tables := []string{"messages", "document_chunks", "files", "sessions", "users", "mcp_servers"}
 	for _, table := range tables {
 		if !DB.Migrator().HasTable(table) {
 			continue

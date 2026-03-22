@@ -20,6 +20,7 @@ import (
 	messageDAO "GopherAI/dao/message"
 	sessionDAO "GopherAI/dao/session"
 	"GopherAI/model"
+	mcpService "GopherAI/service/mcp"
 )
 
 const baseSystemPrompt = `你是一个智能助手，可以帮助用户解答各种问题。
@@ -68,6 +69,7 @@ type preparedChatExecution struct {
 	conversation               []*schema.Message
 	firstAssistantMessageIndex int
 	agent                      adk.Agent
+	cleanup                    func()
 }
 
 type StreamDeltaResponse struct {
@@ -311,6 +313,7 @@ func prepareChatExecution(
 	userRefID uint,
 	sessionID, userMessage string,
 	enabledToolNames []string,
+	mcpServerIDs []string,
 	thinkingMode bool,
 	allowCreateSession bool,
 ) (*preparedChatExecution, code.Code) {
@@ -323,6 +326,19 @@ func prepareChatExecution(
 		log.Println("prepareChatExecution ResolveRequestedTools error:", err)
 		return nil, code.AIModelFail
 	}
+
+	mcpResolvedTools, cleanup, code_ := mcpService.ResolveEnabledTools(ctx, userRefID, mcpServerIDs)
+	if code_ != code.CodeSuccess {
+		return nil, code_
+	}
+	shouldCleanup := true
+	defer func() {
+		if shouldCleanup && cleanup != nil {
+			cleanup()
+		}
+	}()
+
+	resolvedTools = append(resolvedTools, mcpResolvedTools...)
 
 	toolsNodeConfig := compose.ToolsNodeConfig{
 		Tools: resolvedTools,
@@ -360,6 +376,7 @@ func prepareChatExecution(
 	userMessageIndex := len(history)
 	userMessageSchema := schema.UserMessage(userMessage)
 	persistMessage(session.SessionID, buildStoredMessage(session, userRefID, userMessageIndex, userMessageSchema))
+	shouldCleanup = false
 
 	return &preparedChatExecution{
 		session:                    session,
@@ -367,15 +384,21 @@ func prepareChatExecution(
 		conversation:               buildConversationMessages(history, userMessageSchema),
 		firstAssistantMessageIndex: userMessageIndex + 1,
 		agent:                      agent,
+		cleanup:                    cleanup,
 	}, code.CodeSuccess
 }
 
 // Generate 同步生成响应。
-func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*GenerateResult, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode, true)
+func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*GenerateResult, code.Code) {
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, true)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
+	defer func() {
+		if run.cleanup != nil {
+			run.cleanup()
+		}
+	}()
 
 	produced, finalMessage, err := agentcommon.CollectAgentMessages(ctx, run.agent, run.conversation)
 	if err != nil {
@@ -409,8 +432,8 @@ func Generate(ctx context.Context, userRefID uint, sessionID, userMessage string
 }
 
 // Stream 打开一个可供 controller 消费的 SSE 事件流。
-func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, thinkingMode bool) (*StreamHandle, code.Code) {
-	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, thinkingMode, false)
+func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, enabledToolNames []string, mcpServerIDs []string, thinkingMode bool) (*StreamHandle, code.Code) {
+	run, code_ := prepareChatExecution(ctx, userRefID, sessionID, userMessage, enabledToolNames, mcpServerIDs, thinkingMode, false)
 	if code_ != code.CodeSuccess {
 		return nil, code_
 	}
@@ -418,6 +441,11 @@ func Stream(ctx context.Context, userRefID uint, sessionID, userMessage string, 
 	events := make(chan StreamEnvelope)
 	go func() {
 		defer close(events)
+		defer func() {
+			if run.cleanup != nil {
+				run.cleanup()
+			}
+		}()
 
 		if err := emitEvent(ctx, events, NewSuccessEvent(StreamEventTypeResponseCreated, nil)); err != nil {
 			return

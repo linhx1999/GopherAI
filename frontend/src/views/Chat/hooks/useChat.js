@@ -297,9 +297,10 @@ const useChat = () => {
   const latestHistorySessionRef = useRef(null)
   const activeKeyRef = useRef(null)
   const isTempSessionRef = useRef(false)
-  const { availableTools } = useToolCatalog()
+  const { availableTools, availableMCPServers, mcpFeatureEnabled } = useToolCatalog()
 
   const [enabledToolAPINames, setEnabledToolAPINames] = useState([])
+  const [enabledMCPServerIDs, setEnabledMCPServerIDs] = useState([])
   const [thinkingMode, setThinkingMode] = useState(true)
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
@@ -394,6 +395,16 @@ const useChat = () => {
     const availableToolAPINames = new Set(availableTools.map((tool) => tool.apiName))
     setEnabledToolAPINames((previousToolAPINames) => previousToolAPINames.filter((toolName) => availableToolAPINames.has(toolName)))
   }, [availableTools])
+
+  useEffect(() => {
+    if (availableMCPServers.length === 0) {
+      setEnabledMCPServerIDs([])
+      return
+    }
+
+    const availableServerIDs = new Set(availableMCPServers.map((server) => server.serverId))
+    setEnabledMCPServerIDs((previousServerIDs) => previousServerIDs.filter((serverId) => availableServerIDs.has(serverId)))
+  }, [availableMCPServers])
 
   const loadMessages = useCallback(async (sessionId) => {
     const targetSessionId = String(sessionId)
@@ -595,13 +606,15 @@ const useChat = () => {
 
   const buildChatRunOptions = useCallback(() => ({
     enabledToolAPINames: normalizeEnabledToolAPINames(enabledToolAPINames),
+    enabledMCPServerIDs: normalizeEnabledToolAPINames(enabledMCPServerIDs),
     thinkingModeEnabled: thinkingMode
-  }), [enabledToolAPINames, thinkingMode])
+  }), [enabledMCPServerIDs, enabledToolAPINames, thinkingMode])
 
   const buildChatRequest = useCallback((question, runOptions, sessionIdOverride = null) => {
     const payload = {
       message: question,
       tools: runOptions.enabledToolAPINames,
+      mcp_server_ids: runOptions.enabledMCPServerIDs,
       thinking_mode: runOptions.thinkingModeEnabled,
     }
 
@@ -1125,7 +1138,7 @@ const useChat = () => {
 
   const sendGenerateMessage = useCallback(async (question, runOptions) => {
     const payload = buildChatRequest(question, runOptions)
-    const hasEnabledTools = runOptions.enabledToolAPINames.length > 0
+    const hasEnabledTools = runOptions.enabledToolAPINames.length > 0 || runOptions.enabledMCPServerIDs.length > 0
     try {
       const response = await api.post(API_ENDPOINTS.AGENT_GENERATE, payload)
 
@@ -1311,7 +1324,10 @@ const useChat = () => {
     bubbleListRef,
     handleBubbleListScroll,
     availableTools,
+    availableMCPServers,
+    mcpFeatureEnabled,
     enabledToolAPINames,
+    enabledMCPServerIDs,
     thinkingMode,
     isStreaming,
     currentPage,
@@ -1333,6 +1349,7 @@ const useChat = () => {
     handleSend,
     handleActionClick,
     setEnabledToolAPINames,
+    setEnabledMCPServerIDs,
     setThinkingMode,
     setIsStreaming,
     setCurrentPage,

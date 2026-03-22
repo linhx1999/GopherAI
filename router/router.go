@@ -24,6 +24,7 @@ func InitRouter() *gin.Engine {
 		// POST /api/v1/agent/stream - 流式生成
 		// GET /api/v1/agent/:session_id/messages - 获取消息列表
 		SetupAgentRoutes(auth)
+		SetupMCPRoutes(auth)
 
 		// 文件相关接口
 		FileGroup := auth.Group("/file")

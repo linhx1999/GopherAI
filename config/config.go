@@ -77,6 +77,10 @@ type MinioConfig struct {
 	UseSSL    bool
 }
 
+type MCPConfig struct {
+	SecretKey string
+}
+
 type Config struct {
 	EmailConfig
 	RedisConfig
@@ -88,6 +92,7 @@ type Config struct {
 	VoiceServiceConfig
 	OpenAIConfig
 	MinioConfig
+	MCPConfig
 }
 
 type RedisKeyConfig struct {
@@ -188,6 +193,9 @@ func InitConfig() error {
 			SecretKey: getEnv("MINIO_SECRET_KEY", ""),
 			Bucket:    getEnv("MINIO_BUCKET", "gopherai"),
 			UseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
+		},
+		MCPConfig: MCPConfig{
+			SecretKey: getEnv("MCP_SECRET_KEY", ""),
 		},
 	}
 

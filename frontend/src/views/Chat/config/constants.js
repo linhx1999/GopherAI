@@ -52,6 +52,11 @@ export const API_ENDPOINTS = {
   // 工具接口
   TOOLS: 'tools',                                      // GET: 获取工具列表
 
+  // MCP 接口
+  MCP_SERVERS: 'mcp/servers',
+  MCP_SERVER_DETAIL: (serverId) => `mcp/servers/${serverId}`,
+  MCP_SERVER_TEST: (serverId) => `mcp/servers/${serverId}/test`,
+
   // 会话接口
   SESSIONS: 'sessions',                                // GET: 获取会话列表 / POST: 创建会话
   SESSION_TITLE: (sessionId) => `sessions/${sessionId}/title`, // PUT: 更新标题

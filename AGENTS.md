@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-GopherAI 是一个前后端分离的 AI 助手平台，后端使用 Go + Gin，前端使用 React 19 + Ant Design 6，支持多模型对话、工具调用、RAG 检索、文件管理和 TTS。
+GopherAI 是一个前后端分离的 AI 助手平台，后端使用 Go + Gin，前端使用 React 19 + Ant Design 6，支持多模型对话、工具调用、用户自定义 MCP、RAG 检索、文件管理和 TTS。
 
 ### 技术栈
 
@@ -38,12 +38,14 @@ GopherAI/
 ├── service/
 │   ├── agent/
 │   ├── file/
+│   ├── mcp/
 │   ├── rag/
 │   ├── session/
 │   └── user/
 ├── controller/
 │   ├── agent/
 │   ├── file/
+│   ├── mcp/
 │   ├── session/
 │   ├── tts/
 │   └── user/
@@ -69,6 +71,7 @@ GopherAI/
     └── views/
         ├── Chat/
         ├── FileManager/
+        ├── MCPManager/
         ├── Login.jsx
         ├── Register.jsx
         └── Menu.jsx
@@ -81,9 +84,12 @@ GopherAI/
 - 核心目录：`common/agent/`
 - `manager.go` 负责基于全局 ChatModel 池按请求创建 Eino ADK `ChatModelAgent`
 - `common/agent/tools/` 维护工具实现与本地工具定义；目录下除工具文件外，仅保留 `manager.go`（内部管理）和 `interface.go`（对外接口），后端通过 `ResolveRequestedTools` 按请求中的工具名直接解析 `[]tool.BaseTool`
-- 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
+- `common/mcp/` 负责用户自定义 MCP 的请求头加密、按传输类型初始化 SSE / HTTP client 和通过 Eino MCP 适配层拉取远程工具
+- 请求中的 `tools` 仅代表本轮显式启用的内置工具 API 名称；未传或为空时不隐式启用默认工具
+- 请求中的 `mcp_server_ids` 仅代表本轮显式启用的 MCP 服务业务 UUID；服务下的全部工具会整体挂入当前请求
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequentialthinking`
 - 请求中的未知工具名属于参数错误，必须在创建会话、写入消息和调用模型前被拦截
+- 请求中的未知 MCP 服务 ID 或非当前用户配置的 MCP 服务，必须在创建会话、写入消息和调用模型前被拦截
 - `common/llm` 维护按模型名复用的全局 ChatModel 实例池；`thinking_mode` 通过选择不同全局模型实现
 
 内置工具：
@@ -129,7 +135,8 @@ type Message struct {
 - 数据库内部关联统一使用数值字段：`user_ref_id`、`session_ref_id`、`file_ref_id`
 - 项目不使用数据库外键约束；一致性由 service/dao 显式校验与删除顺序保证
 - controller / service / 前端不能暴露数据库自增主键；公开接口只接收和返回业务 UUID
-- `Session` 只保存会话元数据，不持久化工具列表；工具开关完全由请求级 `tools` 决定
+- `Session` 只保存会话元数据，不持久化工具列表；工具开关完全由请求级 `tools` / `mcp_server_ids` 决定
+- `MCPServer` 使用 `gorm.Model` + 业务 UUID `mcp_server_id`；敏感请求头通过 `MCP_SECRET_KEY` 加密后保存在 `headers_ciphertext`
 - 旧标识结构不做兼容；启动时若检测到旧结构，应直接删除相关表并按新模型重建
 
 ### 3. 前端聊天渲染约定
@@ -152,7 +159,8 @@ type Message struct {
 - 列表滚动统一通过 `Bubble.ListRef.scrollTo` 控制；自动下滑只在用户当前接近底部且位于最后一页时生效
 - 当 `Bubble.List` 内容在持续增长时，`scrollTo({ top: 'bottom', behavior: 'smooth' })` 可能被组件内部兼容逻辑退化为 `instant`，以保证列表继续贴底
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
-- 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名，返回结构固定为 `name` / `display_name` / `description`；前端不能把展示名回传给后端
+- 工具目录中的 `tools` 仍返回内置工具 `name` / `display_name` / `description`；`mcp_servers` 返回当前用户 MCP 服务摘要和最近一次成功测试的工具快照
+- 聊天页中的 MCP 选择是“按服务整体启用”，不是逐个远程工具勾选；请求里必须回传 `mcp_server_ids`
 - `sequentialthinking` 由 `common/agent/tools/sequential_thinking.go` 统一维护工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`ResolveRequestedTools` 为每次请求创建独立实例，避免跨请求共享思维链状态
 - 点击“新建会话”仍只创建本地临时会话；首轮流式发送前前端必须先调用 `POST /api/v1/sessions`，拿到真实 `sessionId` 后再更新 `activeKey` 并发起 `/agent/stream`
 - `/agent/stream` 的 SSE 不再下发 `message_index`；前端按 `response.*` 事件顺序驱动当前消息与 ThoughtChain 状态
@@ -187,6 +195,12 @@ type Message struct {
 | POST | `/api/v1/agent/stream` | SSE 流式生成 |
 | GET | `/api/v1/agent/:session_id/messages` | 会话消息 |
 | GET | `/api/v1/tools` | 工具列表 |
+| GET | `/api/v1/mcp/servers` | MCP 服务列表 |
+| GET | `/api/v1/mcp/servers/:server_id` | MCP 服务详情 |
+| POST | `/api/v1/mcp/servers` | 创建 MCP 服务 |
+| PUT | `/api/v1/mcp/servers/:server_id` | 更新 MCP 服务 |
+| DELETE | `/api/v1/mcp/servers/:server_id` | 删除 MCP 服务 |
+| POST | `/api/v1/mcp/servers/:server_id/test` | 测试 MCP 连接并刷新工具快照 |
 | POST | `/api/v1/sessions` | 创建会话 |
 | GET | `/api/v1/sessions` | 会话列表 |
 | DELETE | `/api/v1/sessions/:session_id` | 删除会话 |
@@ -199,10 +213,12 @@ type Message struct {
 | POST | `/api/v1/file/index/:file_id` | 创建索引 |
 | DELETE | `/api/v1/file/index/:file_id` | 删除索引 |
 
-### Agent 接口约定
+### Agent / MCP 接口约定
 
-- `tools` 字段是请求级显式工具 API 名称列表，不写入会话配置
+- `tools` 字段是请求级显式内置工具 API 名称列表，不写入会话配置
+- `mcp_server_ids` 字段是请求级显式 MCP 服务业务 UUID 列表，不写入会话配置
 - 后端通过 `ResolveRequestedTools` 按请求中的工具名顺序去重后装配 `[]tool.BaseTool`；未知工具名直接返回参数错误
+- 后端通过 `service/mcp.ResolveEnabledTools` 校验 `mcp_server_ids` 属于当前用户，并在请求期间按 `transport_type` 临时建立远程 SSE 或 streamable HTTP MCP 连接；请求结束后必须清理 client
 - `service/agent` 的生成与流式入口共享同一套显式参数准备逻辑，不再额外定义内部请求 DTO
 - `service/agent` 负责基于解析后的工具实例构建 `compose.ToolsNodeConfig`，再交给 `common/agent/manager` 创建 ADK agent
 - system prompt 通过 ADK `ChatModelAgentConfig.Instruction` 注入；会话消息数组只包含历史消息和当前用户消息
@@ -212,6 +228,8 @@ type Message struct {
 - 会话列表接口只返回当前用户会话；前端直接读取 `response.data.data.sessions`
 - 创建会话接口返回 `response.data.data.session`，结构与会话列表项一致：`sessionId` / `title` / `createdAt`
 - 历史消息项新增 `message_id`；文件列表与文件操作统一使用 `file_id`
+- MCP 列表/详情接口只允许访问当前用户自己的配置；详情中的请求头只返回 `key` / `masked_value` / `has_value`
+- MCP 测试接口成功时刷新 `tool_snapshot`、`last_test_status`、`last_test_message`、`last_tested_at`；失败时保留上一次成功快照
 
 ## 配置说明
 
@@ -229,6 +247,7 @@ type Message struct {
 | RAG | `RAG_EMBEDDING_MODEL` `RAG_CHAT_MODEL` `RAG_BASE_URL` `RAG_DOC_DIR` `RAG_DIMENSION` |
 | TTS | `VOICE_API_KEY` `VOICE_SECRET_KEY` |
 | MinIO | `MINIO_ENDPOINT` `MINIO_ACCESS_KEY` `MINIO_SECRET_KEY` `MINIO_BUCKET` `MINIO_USE_SSL` |
+| MCP | `MCP_SECRET_KEY` |
 
 ## 构建与运行
 
@@ -294,18 +313,24 @@ type Response struct {
 | `/login` | `Login.jsx` |
 | `/register` | `Register.jsx` |
 | `/menu` | `Menu.jsx` |
-| `/ai-chat` | `views/Chat/index.jsx` |
+| `/chat` | `views/Chat/index.jsx` |
 | `/file-manager` | `views/FileManager/index.jsx` |
+| `/mcp-manager` | `views/MCPManager/index.jsx` |
 
 聊天页重点：
 - 支持普通响应和 SSE 流式响应
 - 支持思考模式切换
-- 支持动态工具目录、TTS、会话管理、RAG 文件选择
+- 支持动态工具目录、MCP 服务选择、TTS、会话管理、RAG 文件选择
 
 文件管理页重点：
 - 顶部工具栏 + 主内容布局
 - 逻辑集中在 `useFileManager`
 - 支持上传、索引、删索引、删除文件和状态展示
+
+MCP 管理页重点：
+- 支持用户新增、编辑、删除自己的远程 SSE / HTTP MCP 服务
+- 支持加密保存自定义请求头，并在编辑态通过 `keep_existing` 语义保留旧值
+- 支持测试连接并展示最近一次成功测试发现的工具快照
 
 ## 常见开发任务
 

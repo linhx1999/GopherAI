@@ -4,6 +4,7 @@ import Register from '../views/Register'
 import Menu from '../views/Menu'
 import Chat from '../views/Chat'
 import FileManager from '../views/FileManager'
+import MCPManager from '../views/MCPManager'
 import PrivateRoute from '../components/PrivateRoute'
 import PublicRoute from '../components/PublicRoute'
 
@@ -39,6 +40,10 @@ const router = createBrowserRouter([
       {
         path: '/file-manager',
         element: <FileManager />
+      },
+      {
+        path: '/mcp-manager',
+        element: <MCPManager />
       }
     ]
   }

@@ -10,6 +10,7 @@ import (
 	"GopherAI/common/code"
 	"GopherAI/controller"
 	agentService "GopherAI/service/agent"
+	mcpService "GopherAI/service/mcp"
 )
 
 const ginSSEEventName = "message"
@@ -18,7 +19,8 @@ const ginSSEEventName = "message"
 type ChatRequest struct {
 	SessionID    string   `json:"session_id"`                 // 流式接口必填，非流式接口可选
 	Message      string   `json:"message" binding:"required"` // 必填，用户消息内容
-	Tools        []string `json:"tools"`                      // 可选，工具 API 调用名列表
+	Tools        []string `json:"tools"`                      // 可选，内置工具 API 调用名列表
+	MCPServerIDs []string `json:"mcp_server_ids"`             // 可选，MCP 服务 ID 列表
 	ThinkingMode bool     `json:"thinking_mode"`              // 可选，是否启用思考模型
 }
 
@@ -37,6 +39,7 @@ func GenerateHandler(c *gin.Context) {
 		req.SessionID,
 		req.Message,
 		req.Tools,
+		req.MCPServerIDs,
 		req.ThinkingMode,
 	)
 	if code_ != code.CodeSuccess {
@@ -77,6 +80,7 @@ func StreamHandler(c *gin.Context) {
 		req.SessionID,
 		req.Message,
 		req.Tools,
+		req.MCPServerIDs,
 		req.ThinkingMode,
 	)
 	if code_ != code.CodeSuccess {
@@ -114,11 +118,20 @@ func GetMessages(c *gin.Context) {
 // GET /api/v1/tools
 func GetTools(c *gin.Context) {
 	toolList := tools.ListAvailableTools()
+	mcpServers, featureEnabled, code_ := mcpService.ListToolCatalogServers(c.GetUint("userID"))
+	if code_ != code.CodeSuccess {
+		writeCodeResponse(c, code_)
+		return
+	}
 
 	c.JSON(http.StatusOK, controller.Response{
 		Code: code.CodeSuccess,
 		Msg:  code.CodeSuccess.Msg(),
-		Data: gin.H{"tools": toolList},
+		Data: gin.H{
+			"tools":               toolList,
+			"mcp_servers":         mcpServers,
+			"mcp_feature_enabled": featureEnabled,
+		},
 	})
 }
 

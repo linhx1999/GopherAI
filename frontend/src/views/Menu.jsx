@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Layout, Card, Button, Modal, App } from 'antd'
-import { MessageOutlined, FolderOutlined, LogoutOutlined } from '@ant-design/icons'
+import { MessageOutlined, FolderOutlined, LogoutOutlined, ApiOutlined } from '@ant-design/icons'
 import './Menu.css'
 
 const { Header, Content } = Layout
@@ -37,6 +37,13 @@ const Menu = () => {
       description: '管理知识库文件和索引',
       icon: <FolderOutlined style={{ fontSize: 48, color: '#faad14' }} />,
       path: '/file-manager'
+    },
+    {
+      key: 'mcp-manager',
+      title: 'MCP管理',
+      description: '配置自定义远程MCP服务',
+      icon: <ApiOutlined style={{ fontSize: 48, color: '#0f766e' }} />,
+      path: '/mcp-manager'
     }
   ]
 
