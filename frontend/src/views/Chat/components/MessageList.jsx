@@ -1,6 +1,6 @@
 import { Pagination } from 'antd'
 import { Welcome, Bubble, Actions } from '@ant-design/x'
-import AssistantBubble, { ToolThoughtChain } from './MessageBubble'
+import AssistantBubble from './MessageBubble'
 import { MESSAGE_PAGE_SIZE, MESSAGE_ROLES } from '../config/constants'
 import { buildDisplayMessages, createMessageActions } from '../utils/helpers.jsx'
 
@@ -40,16 +40,6 @@ const MessageList = ({
                   toolTraceRecords={item.toolTraceRecords}
                   toolDisplayNames={toolDisplayNames}
                   onActionClick={onActionClick}
-                />
-              )
-            }
-
-            if (item.type === 'tool_trace') {
-              return (
-                <ToolThoughtChain
-                  key={item.key}
-                  toolTraceRecords={item.toolTraceRecords}
-                  toolDisplayNames={toolDisplayNames}
                 />
               )
             }

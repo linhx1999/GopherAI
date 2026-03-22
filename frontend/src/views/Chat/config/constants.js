@@ -95,7 +95,20 @@ export const MESSAGE_ROLES = {
 
 export const ASSISTANT_DISPLAY_MODES = {
   DEFAULT: 'default',
-  TOOL_CHAIN: 'tool_chain',
+  THOUGHT_CHAIN: 'thought_chain',
+  TOOL_CHAIN: 'thought_chain',
+}
+
+export const TOOL_TRACE_KINDS = {
+  REASONING: 'reasoning',
+  CALL: 'tool_call',
+  RESULT: 'tool_result',
+}
+
+export const TOOL_TRACE_STATUS = {
+  LOADING: 'loading',
+  SUCCESS: 'success',
+  ERROR: 'error',
 }
 
 // ==================== 特殊会话 ID ====================

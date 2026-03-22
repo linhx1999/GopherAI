@@ -4,7 +4,9 @@ import XMarkdown from '@ant-design/x-markdown'
 import {
   ASSISTANT_DISPLAY_MODES,
   COLORS,
-  MESSAGE_MAX_WIDTH
+  MESSAGE_MAX_WIDTH,
+  TOOL_TRACE_KINDS,
+  TOOL_TRACE_STATUS
 } from '../config/constants'
 
 const { Text } = Typography
@@ -33,11 +35,11 @@ const DEFAULT_TOOL_DISPLAY_NAMES = {
   sequential_thinking: '逐步思考'
 }
 
-const hasVisibleMessageText = (message = {}) => Boolean(
+export const hasVisibleMessageText = (message = {}) => Boolean(
   String(message?.content || '').trim() || String(message?.reasoning_content || '').trim()
 )
 
-const getMessageDisplayContent = (message = {}) => {
+export const getMessageDisplayContent = (message = {}) => {
   const reasoning = String(message?.reasoning_content || '').trim()
   const content = String(message?.content || '').trim()
 
@@ -47,6 +49,8 @@ const getMessageDisplayContent = (message = {}) => {
 
   return reasoning || content
 }
+
+export const getAssistantPlainContent = (message = {}) => String(message?.content || '').trim()
 
 // Role 配置
 export const createRoleConfig = () => ({
@@ -155,11 +159,19 @@ export const getToolDisplayName = (toolName, toolDisplayNames = DEFAULT_TOOL_DIS
   toolDisplayNames[toolName] || DEFAULT_TOOL_DISPLAY_NAMES[toolName] || toolName || '工具'
 )
 
+export const hasToolCalls = (message = {}) => Array.isArray(message?.tool_calls) && message.tool_calls.length > 0
+
+export const isToolCallAssistantMessage = (message = {}) => (
+  message?.role === 'assistant' &&
+  hasToolCalls(message) &&
+  message?.response_meta?.finish_reason === 'tool_calls'
+)
+
 const isToolTraceMessage = (message = {}) => {
   if (message.role === 'tool') return true
   if (message.role !== 'assistant') return false
   const hasVisibleAnswer = hasVisibleMessageText(message)
-  return !hasVisibleAnswer && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
+  return !hasVisibleAnswer && hasToolCalls(message)
 }
 
 const getThoughtChainDescription = (descriptionMessage = null) => {
@@ -172,7 +184,12 @@ const getThoughtChainDescription = (descriptionMessage = null) => {
 
 export const hasToolActivity = (toolTraceRecords = []) => toolTraceRecords.some((record) => {
   const message = record.message || {}
-  return message.role === 'tool' || (Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
+  return (
+    record.kind === TOOL_TRACE_KINDS.REASONING ||
+    record.kind === TOOL_TRACE_KINDS.RESULT ||
+    message.role === 'tool' ||
+    hasToolCalls(message)
+  )
 })
 
 export const shouldRenderToolTrace = (record, toolTraceRecords = []) => {
@@ -180,16 +197,48 @@ export const shouldRenderToolTrace = (record, toolTraceRecords = []) => {
     return false
   }
 
-  if (record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
+  if (
+    record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN ||
+    record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+  ) {
     return true
   }
 
   return hasToolActivity(toolTraceRecords)
 }
 
-const buildToolCallItems = ({ record, toolTraceRecords = [] }) => toolTraceRecords.flatMap((traceRecord, traceIndex) => {
+const getTraceStatus = (traceRecord = {}) => {
+  if (traceRecord.status) {
+    return traceRecord.status
+  }
+  return traceRecord.pending ? TOOL_TRACE_STATUS.LOADING : TOOL_TRACE_STATUS.SUCCESS
+}
+
+const buildReasoningItems = (traceRecord) => {
+  const status = getTraceStatus(traceRecord)
+  const reasoningContent = String(traceRecord.message?.reasoning_content || '').trim()
+
+  return [{
+    key: `${traceRecord.key}-reasoning`,
+    title: '深度思考',
+    description: status === TOOL_TRACE_STATUS.ERROR
+      ? '思考中断'
+      : (reasoningContent ? '模型正在拆解问题' : '正在分析问题'),
+    content: reasoningContent ? (
+      <div className="thought-chain-markdown">
+        {renderMarkdown(reasoningContent)}
+      </div>
+    ) : null,
+    collapsible: Boolean(reasoningContent),
+    status,
+    blink: status === TOOL_TRACE_STATUS.LOADING
+  }]
+}
+
+const buildToolCallItems = ({ record, traceRecord, traceIndex = 0, toolDisplayNames = DEFAULT_TOOL_DISPLAY_NAMES }) => {
   const message = traceRecord.message || {}
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+  const status = getTraceStatus(traceRecord)
 
   return toolCalls.map((call, index) => {
     const toolName = call.function?.name || call.id || `tool-${index + 1}`
@@ -200,64 +249,76 @@ const buildToolCallItems = ({ record, toolTraceRecords = [] }) => toolTraceRecor
 
     return {
       key: `${traceRecord.key}-call-${call.id || call.index || index}`,
-      title: toolName,
-      description: traceDescription || (formattedArguments ? '参数已准备' : '等待工具执行'),
+      title: getToolDisplayName(toolName, toolDisplayNames),
+      description: status === TOOL_TRACE_STATUS.ERROR
+        ? (traceDescription || '工具调用失败')
+        : (traceDescription || (formattedArguments ? '参数已准备' : '等待工具执行')),
       content: formattedArguments ? (
         <pre className="thought-chain-code-block">{formattedArguments}</pre>
       ) : null,
       collapsible: Boolean(formattedArguments),
-      status: traceRecord.pending ? 'loading' : 'success',
-      blink: Boolean(traceRecord.pending)
+      status,
+      blink: status === TOOL_TRACE_STATUS.LOADING
     }
   })
-})
+}
 
-const buildToolResultItems = (toolTraceRecords = []) => toolTraceRecords.flatMap((record, index) => {
+const buildToolResultItems = (record, index = 0, toolDisplayNames = DEFAULT_TOOL_DISPLAY_NAMES) => {
   const message = record.message || {}
   if (message.role !== 'tool') {
     return []
   }
 
+  const status = getTraceStatus(record)
   const toolName = message.tool_name || message.name || `tool-result-${index + 1}`
   const content = message.content || ''
 
   return [{
     key: `${record.key}-result`,
-    title: `${toolName} 执行结果`,
-    description: content ? '工具返回了可展示内容' : '工具已完成执行',
+    title: `${getToolDisplayName(toolName, toolDisplayNames)} 执行结果`,
+    description: status === TOOL_TRACE_STATUS.ERROR
+      ? '工具执行失败'
+      : (content ? '工具返回了可展示内容' : '工具已完成执行'),
     content: content ? (
       <div className="thought-chain-markdown">
         {renderMarkdown(content)}
       </div>
     ) : null,
     collapsible: Boolean(content),
-    status: record.pending ? 'loading' : 'success',
-    blink: Boolean(record.pending)
+    status,
+    blink: status === TOOL_TRACE_STATUS.LOADING
   }]
-})
+}
 
-export const buildToolTraceItems = ({ record = null, toolTraceRecords = [] }) => {
-  const toolCallItems = buildToolCallItems({ record, toolTraceRecords })
-  const toolResultItems = buildToolResultItems(toolTraceRecords)
+export const buildToolTraceItems = ({ record = null, toolTraceRecords = [], toolDisplayNames = DEFAULT_TOOL_DISPLAY_NAMES }) => {
+  return toolTraceRecords.flatMap((traceRecord, traceIndex) => {
+    if (!traceRecord?.kind) {
+      return []
+    }
 
-  return [
-    ...toolCallItems,
-    ...toolResultItems
-  ].filter(Boolean)
+    if (traceRecord.kind === TOOL_TRACE_KINDS.REASONING) {
+      return buildReasoningItems(traceRecord)
+    }
+
+    if (traceRecord.kind === TOOL_TRACE_KINDS.CALL) {
+      return buildToolCallItems({ record, traceRecord, traceIndex, toolDisplayNames })
+    }
+
+    if (traceRecord.kind === TOOL_TRACE_KINDS.RESULT) {
+      return buildToolResultItems(traceRecord, traceIndex, toolDisplayNames)
+    }
+
+    return []
+  }).filter(Boolean)
 }
 
 export const buildDisplayMessages = (records) => {
   const display = []
-  let toolTraceBuffer = []
 
   records.forEach((record) => {
     const message = record.message || {}
 
     if (message.role === 'user' || message.role === 'system') {
-      if (toolTraceBuffer.length > 0) {
-        display.push({ type: 'tool_trace', key: `tool-trace-${toolTraceBuffer[0].key}`, toolTraceRecords: toolTraceBuffer })
-        toolTraceBuffer = []
-      }
       display.push({ type: message.role, key: record.key, record })
       return
     }
@@ -266,15 +327,10 @@ export const buildDisplayMessages = (records) => {
       message.role === 'assistant' &&
       (
         record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN ||
-        record.planningMessage ||
+        record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN ||
         (Array.isArray(record.toolTraceRecords) && record.toolTraceRecords.length > 0)
       )
     ) {
-      if (toolTraceBuffer.length > 0) {
-        display.push({ type: 'tool_trace', key: `tool-trace-${toolTraceBuffer[0].key}`, toolTraceRecords: toolTraceBuffer })
-        toolTraceBuffer = []
-      }
-
       display.push({
         type: 'assistant',
         key: record.key,
@@ -284,8 +340,17 @@ export const buildDisplayMessages = (records) => {
       return
     }
 
+    if (Array.isArray(record.toolTraceRecords) && record.toolTraceRecords.length > 0) {
+      display.push({
+        type: 'assistant',
+        key: record.key,
+        record,
+        toolTraceRecords: record.toolTraceRecords
+      })
+      return
+    }
+
     if (isToolTraceMessage(message)) {
-      toolTraceBuffer.push(record)
       return
     }
 
@@ -294,18 +359,11 @@ export const buildDisplayMessages = (records) => {
         type: 'assistant',
         key: record.key,
         record,
-        toolTraceRecords: toolTraceBuffer
+        toolTraceRecords: record.toolTraceRecords || []
       })
-      toolTraceBuffer = []
       return
     }
-
-    toolTraceBuffer.push(record)
   })
-
-  if (toolTraceBuffer.length > 0) {
-    display.push({ type: 'tool_trace', key: `tool-trace-${toolTraceBuffer[0].key}`, toolTraceRecords: toolTraceBuffer })
-  }
 
   return display
 }

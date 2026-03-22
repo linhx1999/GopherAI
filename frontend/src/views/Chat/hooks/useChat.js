@@ -10,11 +10,16 @@ import {
   API_ENDPOINTS,
   MESSAGE_ROLES,
   SPECIAL_SESSIONS,
-  SSE_EVENT_TYPES
+  SSE_EVENT_TYPES,
+  TOOL_TRACE_KINDS,
+  TOOL_TRACE_STATUS
 } from '../config/constants'
 import {
   generateMessageId,
-  isMessageFinished,
+  getAssistantPlainContent,
+  hasToolCalls,
+  hasVisibleMessageText,
+  isToolCallAssistantMessage,
   isSchemaMessagePayload,
   mergeSchemaMessageChunk,
   normalizeEnabledToolAPINames,
@@ -25,6 +30,17 @@ const MESSAGE_RENDER_MODE = {
   INSTANT: 'instant',
   STREAM: 'stream'
 }
+
+const createEmptyAssistantMessage = () => ({
+  role: MESSAGE_ROLES.ASSISTANT,
+  content: '',
+  reasoning_content: ''
+})
+
+const createReasoningStepMessage = (message = {}) => ({
+  role: MESSAGE_ROLES.ASSISTANT,
+  reasoning_content: message?.reasoning_content || ''
+})
 
 const parseSessionItem = (session) => {
   if (!session?.sessionId) {
@@ -56,14 +72,145 @@ const parseHistoryResponse = (responseData) => {
     return []
   }
 
-  return history.map((item) => createRecord({
-    key: `msg_${item.index}_${item.message?.role || 'unknown'}`,
-    index: item.index,
-    message: item.message || {},
-    pending: false,
-    createdAt: item.created_at,
-    renderMode: MESSAGE_RENDER_MODE.INSTANT
-  }))
+  const records = []
+  let activeAssistantRecord = null
+
+  const pushActiveAssistantRecord = () => {
+    if (!activeAssistantRecord) {
+      return
+    }
+
+    records.push(activeAssistantRecord)
+    activeAssistantRecord = null
+  }
+
+  history.forEach((item) => {
+    const historyMessage = item.message || {}
+    const baseMeta = {
+      index: item.index,
+      createdAt: item.created_at,
+      renderMode: MESSAGE_RENDER_MODE.INSTANT
+    }
+
+    if (historyMessage.role === MESSAGE_ROLES.USER || historyMessage.role === MESSAGE_ROLES.SYSTEM) {
+      pushActiveAssistantRecord()
+      records.push(createRecord({
+        ...baseMeta,
+        key: `msg_${item.index}_${historyMessage.role || 'unknown'}`,
+        message: historyMessage,
+        pending: false
+      }))
+      return
+    }
+
+    if (isToolCallAssistantMessage(historyMessage)) {
+      if (!activeAssistantRecord) {
+        activeAssistantRecord = createRecord({
+          ...baseMeta,
+          key: `msg_${item.index}_assistant_tool_chain`,
+          message: createEmptyAssistantMessage(),
+          pending: false,
+          assistantRenderMode: ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN,
+          toolTraceRecords: []
+        })
+      }
+
+      if (String(historyMessage.reasoning_content || '').trim()) {
+        activeAssistantRecord.toolTraceRecords = [
+          ...(activeAssistantRecord.toolTraceRecords || []),
+          createToolTraceRecord({
+            ...baseMeta,
+            key: `msg_${item.index}_reasoning`,
+            kind: TOOL_TRACE_KINDS.REASONING,
+            message: createReasoningStepMessage(historyMessage),
+            status: TOOL_TRACE_STATUS.SUCCESS
+          })
+        ]
+      }
+
+      activeAssistantRecord.assistantRenderMode = ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+      activeAssistantRecord.toolTraceRecords = [
+        ...(activeAssistantRecord.toolTraceRecords || []),
+        createToolTraceRecord({
+          ...baseMeta,
+          key: `msg_${item.index}_tool_call`,
+          kind: TOOL_TRACE_KINDS.CALL,
+          message: historyMessage,
+          traceDescription: getAssistantPlainContent(historyMessage)
+            ? { role: MESSAGE_ROLES.ASSISTANT, content: getAssistantPlainContent(historyMessage) }
+            : null,
+          status: TOOL_TRACE_STATUS.SUCCESS
+        })
+      ]
+      return
+    }
+
+    if (historyMessage.role === MESSAGE_ROLES.TOOL) {
+      if (!activeAssistantRecord) {
+        activeAssistantRecord = createRecord({
+          ...baseMeta,
+          key: `msg_${item.index}_assistant_tool_chain`,
+          message: createEmptyAssistantMessage(),
+          pending: false,
+          assistantRenderMode: ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN,
+          toolTraceRecords: []
+        })
+      }
+
+      activeAssistantRecord.assistantRenderMode = ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+      activeAssistantRecord.toolTraceRecords = [
+        ...(activeAssistantRecord.toolTraceRecords || []),
+        createToolTraceRecord({
+          ...baseMeta,
+          key: `msg_${item.index}_tool_result`,
+          kind: TOOL_TRACE_KINDS.RESULT,
+          message: historyMessage,
+          status: TOOL_TRACE_STATUS.SUCCESS
+        })
+      ]
+      return
+    }
+
+    if (historyMessage.role === MESSAGE_ROLES.ASSISTANT) {
+      const reasoningTraceRecords = String(historyMessage.reasoning_content || '').trim()
+        ? [createToolTraceRecord({
+          ...baseMeta,
+          key: `msg_${item.index}_reasoning`,
+          kind: TOOL_TRACE_KINDS.REASONING,
+          message: createReasoningStepMessage(historyMessage),
+          status: TOOL_TRACE_STATUS.SUCCESS
+        })]
+        : []
+
+      if (activeAssistantRecord) {
+        activeAssistantRecord.toolTraceRecords = [
+          ...(activeAssistantRecord.toolTraceRecords || []),
+          ...reasoningTraceRecords
+        ]
+        activeAssistantRecord.message = historyMessage
+        activeAssistantRecord.pending = false
+        activeAssistantRecord.assistantRenderMode = activeAssistantRecord.toolTraceRecords.length > 0
+          ? ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+          : ASSISTANT_DISPLAY_MODES.DEFAULT
+        pushActiveAssistantRecord()
+        return
+      }
+
+      records.push(createRecord({
+        ...baseMeta,
+        key: `msg_${item.index}_assistant`,
+        message: historyMessage,
+        pending: false,
+        assistantRenderMode: reasoningTraceRecords.length > 0
+          ? ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+          : ASSISTANT_DISPLAY_MODES.DEFAULT,
+        toolTraceRecords: reasoningTraceRecords
+      }))
+    }
+  })
+
+  pushActiveAssistantRecord()
+  return records
 }
 
 const createRecord = ({
@@ -78,7 +225,9 @@ const createRecord = ({
   enabledToolAPINames = [],
   planningMessage = null,
   toolTraceRecords = [],
-  traceDescription = null
+  traceDescription = null,
+  kind = null,
+  status = null
 }) => ({
   key,
   index,
@@ -91,35 +240,49 @@ const createRecord = ({
   enabledToolAPINames,
   planningMessage,
   toolTraceRecords,
-  traceDescription
+  traceDescription,
+  kind,
+  status
 })
 
 const hasMessageIndex = (records = [], messageIndex) => (
   typeof messageIndex === 'number' && records.some((record) => record.index === messageIndex)
 )
 
-const hasVisibleAssistantContent = (message = {}) => Boolean(
-  String(message?.content || '').trim() || String(message?.reasoning_content || '').trim()
-)
+const hasVisibleAssistantContent = (message = {}) => hasVisibleMessageText(message)
 
 const createToolTraceRecord = ({
+  key = generateMessageId(),
   index,
-  chunk,
+  kind,
+  message,
   traceDescription = null,
-  pending = chunk?.role === MESSAGE_ROLES.TOOL ? false : !isMessageFinished(chunk)
+  status = TOOL_TRACE_STATUS.LOADING,
+  renderMode = MESSAGE_RENDER_MODE.STREAM,
+  createdAt = null
 }) => createRecord({
+  key,
   index,
-  message: mergeSchemaMessageChunk({}, chunk),
-  pending,
-  renderMode: MESSAGE_RENDER_MODE.STREAM,
-  traceDescription
+  message: mergeSchemaMessageChunk({}, message),
+  pending: status === TOOL_TRACE_STATUS.LOADING,
+  renderMode,
+  createdAt,
+  traceDescription,
+  kind,
+  status
 })
 
-const settleRecord = (record) => ({
+const settleToolTraceRecord = (record, fallbackStatus = TOOL_TRACE_STATUS.SUCCESS) => ({
+  ...record,
+  pending: false,
+  status: record?.status === TOOL_TRACE_STATUS.LOADING ? fallbackStatus : (record?.status || fallbackStatus)
+})
+
+const settleRecord = (record, traceFallbackStatus = TOOL_TRACE_STATUS.SUCCESS) => ({
   ...record,
   pending: false,
   toolTraceRecords: Array.isArray(record.toolTraceRecords)
-    ? record.toolTraceRecords.map((item) => ({ ...item, pending: false }))
+    ? record.toolTraceRecords.map((item) => settleToolTraceRecord(item, traceFallbackStatus))
     : record.toolTraceRecords
 })
 
@@ -403,201 +566,366 @@ const useChat = () => {
     let didCreateSession = false
     let activeMessageKey = null
     let activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
-    let activeToolTraceKey = null
-    let pendingToolCallChunk = null
+    let activeAssistantMessage = createEmptyAssistantMessage()
+    let activeReasoningTraceKey = null
+    let activeToolCallTraceKey = null
+    let activeToolCallMessage = null
+    let activeToolResultTraceKey = null
+    let activeToolResultMessage = null
     const createdRecordKeys = []
 
-    const finalizeStream = () => {
+    const finalizeStream = (traceFallbackStatus = TOOL_TRACE_STATUS.SUCCESS) => {
       if (createdRecordKeys.length > 0) {
         setMessages((prev) => prev.map((item) => (
-          createdRecordKeys.includes(item.key) ? settleRecord(item) : item
+          createdRecordKeys.includes(item.key) ? settleRecord(item, traceFallbackStatus) : item
         )))
       }
       activeMessageKey = null
+      activeAssistantMessage = createEmptyAssistantMessage()
       activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
-      activeToolTraceKey = null
-      pendingToolCallChunk = null
+      activeReasoningTraceKey = null
+      activeToolCallTraceKey = null
+      activeToolCallMessage = null
+      activeToolResultTraceKey = null
+      activeToolResultMessage = null
       setIsLoading(false)
     }
 
-    const createAssistantRecord = (chunk) => {
-      const record = createRecord({
-        index: null,
-        message: mergeSchemaMessageChunk({}, chunk),
-        pending: !isMessageFinished(chunk),
-        renderMode: MESSAGE_RENDER_MODE.STREAM,
-        expectReasoning: runOptions.thinkingModeEnabled && chunk.role === MESSAGE_ROLES.ASSISTANT,
-        assistantRenderMode: ASSISTANT_DISPLAY_MODES.DEFAULT,
-        enabledToolAPINames: runOptions.enabledToolAPINames
-      })
-      activeMessageKey = isMessageFinished(record.message) ? null : record.key
-      activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
-      activeToolTraceKey = null
-      pendingToolCallChunk = null
-      createdRecordKeys.push(record.key)
-      setMessages((prev) => [...prev, record])
-    }
-
-    const updateActiveAssistantRecord = (chunk) => {
-      setMessages((prev) => prev.map((item) => {
-        if (item.key !== activeMessageKey) {
-          return item
-        }
-        const mergedMessage = mergeSchemaMessageChunk(item.message, chunk)
-        const pending = !isMessageFinished(mergedMessage)
-        if (!pending) {
-          activeMessageKey = null
-          activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
-          activeToolTraceKey = null
-          pendingToolCallChunk = null
-        }
-        return {
-          ...item,
-          message: mergedMessage,
-          pending
-        }
-      }))
-    }
-
-    const appendToolTraceToActiveRecord = (chunk, { mergeIntoLast = false, traceDescription = null } = {}) => {
-      setMessages((prev) => prev.map((item) => {
-        if (item.key !== activeMessageKey) {
-          return item
-        }
-
-        const toolTraceRecords = Array.isArray(item.toolTraceRecords) ? [...item.toolTraceRecords] : []
-        if (mergeIntoLast && activeToolTraceKey) {
-          const traceIndex = toolTraceRecords.findIndex((record) => record.key === activeToolTraceKey)
-          if (traceIndex >= 0) {
-            const traceRecord = toolTraceRecords[traceIndex]
-            const mergedMessage = mergeSchemaMessageChunk(traceRecord.message, chunk)
-            const pending = traceRecord.message?.role === MESSAGE_ROLES.TOOL ? false : !isMessageFinished(mergedMessage)
-            toolTraceRecords[traceIndex] = {
-              ...traceRecord,
-              message: mergedMessage,
-              pending
-            }
-            return { ...item, toolTraceRecords }
-          }
-        }
-
-        const traceRecord = createToolTraceRecord({
-          index: null,
-          chunk,
-          traceDescription
-        })
-        activeToolTraceKey = traceRecord.key
-        return {
-          ...item,
-          toolTraceRecords: [...toolTraceRecords, traceRecord]
-        }
-      }))
-    }
-
-    const commitPendingToolCallToThoughtChain = () => {
-      if (!pendingToolCallChunk) {
+    const ensureActiveAssistantRecord = (assistantRenderMode = ASSISTANT_DISPLAY_MODES.DEFAULT) => {
+      if (activeMessageKey) {
         return
       }
 
-      setMessages((prev) => prev.map((item) => {
-        if (item.key !== activeMessageKey) {
-          return item
-        }
-
-        const traceDescription = hasVisibleAssistantContent(item.message)
-          ? mergeSchemaMessageChunk({}, item.message)
-          : null
-
-        const traceRecord = createToolTraceRecord({
-          index: null,
-          chunk: pendingToolCallChunk,
-          traceDescription,
-          pending: true
-        })
-
-        activeRecordMode = ASSISTANT_DISPLAY_MODES.TOOL_CHAIN
-        activeToolTraceKey = traceRecord.key
-
-        return {
-          ...item,
-          message: { role: MESSAGE_ROLES.ASSISTANT, content: '', reasoning_content: '' },
-          toolTraceRecords: [...(item.toolTraceRecords || []), traceRecord],
-          assistantRenderMode: ASSISTANT_DISPLAY_MODES.TOOL_CHAIN,
-          enabledToolAPINames: runOptions.enabledToolAPINames,
-          pending: true
-        }
-      }))
-
-      pendingToolCallChunk = null
-    }
-
-    const createToolChainRecord = (chunk, traceDescription = null) => {
-      const safeChunk = chunk || { role: MESSAGE_ROLES.ASSISTANT, tool_calls: [] }
-      const traceRecord = createToolTraceRecord({
-        index: null,
-        chunk: safeChunk,
-        traceDescription,
-        pending: safeChunk.role === MESSAGE_ROLES.ASSISTANT
-      })
-
       const record = createRecord({
         index: null,
-        message: { role: MESSAGE_ROLES.ASSISTANT, content: '', reasoning_content: '' },
+        message: createEmptyAssistantMessage(),
         pending: true,
         renderMode: MESSAGE_RENDER_MODE.STREAM,
         expectReasoning: runOptions.thinkingModeEnabled,
-        assistantRenderMode: ASSISTANT_DISPLAY_MODES.TOOL_CHAIN,
+        assistantRenderMode,
         enabledToolAPINames: runOptions.enabledToolAPINames,
-        toolTraceRecords: [traceRecord]
+        toolTraceRecords: []
       })
 
       activeMessageKey = record.key
-      activeRecordMode = ASSISTANT_DISPLAY_MODES.TOOL_CHAIN
-      activeToolTraceKey = traceRecord.key
-      pendingToolCallChunk = null
+      activeRecordMode = assistantRenderMode
+      activeAssistantMessage = createEmptyAssistantMessage()
       createdRecordKeys.push(record.key)
       setMessages((prev) => [...prev, record])
     }
 
-    const updateFinalAssistantInToolChain = (chunk) => {
+    const patchActiveRecord = (updater) => {
+      if (!activeMessageKey) {
+        return
+      }
+
       setMessages((prev) => prev.map((item) => {
         if (item.key !== activeMessageKey) {
           return item
         }
 
-        const mergedMessage = mergeSchemaMessageChunk(item.message, chunk)
-        const pending = !isMessageFinished(mergedMessage)
-        if (!pending) {
-          activeMessageKey = null
-          activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
-          activeToolTraceKey = null
-          pendingToolCallChunk = null
-        }
-
-        return {
-          ...item,
-          message: mergedMessage,
-          pending
-        }
+        return updater(item)
       }))
     }
 
-    const updateCurrentToolCallStatus = (chunk) => {
-      if (!activeMessageKey || !activeToolTraceKey) {
-        return
-      }
-      appendToolTraceToActiveRecord(chunk, { mergeIntoLast: true })
+    const setActiveAssistantState = ({
+      message: nextMessage = activeAssistantMessage,
+      pending = true,
+      assistantRenderMode = activeRecordMode
+    } = {}) => {
+      ensureActiveAssistantRecord(assistantRenderMode)
+      activeAssistantMessage = nextMessage
+      activeRecordMode = assistantRenderMode
+
+      patchActiveRecord((item) => ({
+        ...item,
+        message: nextMessage,
+        pending,
+        assistantRenderMode
+      }))
     }
 
-    const updatePendingToolCallChunk = (chunk) => {
-      pendingToolCallChunk = mergeSchemaMessageChunk(
-        pendingToolCallChunk || { role: MESSAGE_ROLES.ASSISTANT, content: '', reasoning_content: '' },
+    const appendToolTraceRecord = (traceRecord) => {
+      ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+      activeRecordMode = ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+
+      patchActiveRecord((item) => ({
+        ...item,
+        message: item.message || createEmptyAssistantMessage(),
+        pending: true,
+        assistantRenderMode: ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN,
+        toolTraceRecords: [...(item.toolTraceRecords || []), traceRecord]
+      }))
+    }
+
+    const updateToolTraceRecord = (traceKey, updater) => {
+      if (!traceKey) {
+        return
+      }
+
+      patchActiveRecord((item) => {
+        const toolTraceRecords = Array.isArray(item.toolTraceRecords) ? [...item.toolTraceRecords] : []
+        const traceIndex = toolTraceRecords.findIndex((record) => record.key === traceKey)
+        if (traceIndex === -1) {
+          return item
+        }
+
+        toolTraceRecords[traceIndex] = updater(toolTraceRecords[traceIndex])
+        return {
+          ...item,
+          toolTraceRecords
+        }
+      })
+    }
+
+    const removeToolTraceRecord = (traceKey) => {
+      if (!traceKey) {
+        return
+      }
+
+      patchActiveRecord((item) => ({
+        ...item,
+        toolTraceRecords: (item.toolTraceRecords || []).filter((traceRecord) => traceRecord.key !== traceKey)
+      }))
+    }
+
+    const ensureReasoningStep = ({ placeholder = false } = {}) => {
+      ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+
+      const reasoningMessage = createReasoningStepMessage(activeAssistantMessage)
+      const hasReasoning = Boolean(String(reasoningMessage.reasoning_content || '').trim())
+      if (!placeholder && !hasReasoning) {
+        return
+      }
+
+      if (!activeReasoningTraceKey) {
+        const traceRecord = createToolTraceRecord({
+          kind: TOOL_TRACE_KINDS.REASONING,
+          message: reasoningMessage,
+          status: TOOL_TRACE_STATUS.LOADING
+        })
+
+        activeReasoningTraceKey = traceRecord.key
+        appendToolTraceRecord(traceRecord)
+        return
+      }
+
+      updateToolTraceRecord(activeReasoningTraceKey, (traceRecord) => ({
+        ...traceRecord,
+        message: reasoningMessage,
+        pending: true,
+        status: TOOL_TRACE_STATUS.LOADING
+      }))
+    }
+
+    const finalizeReasoningStep = (messagePayload, status = TOOL_TRACE_STATUS.SUCCESS) => {
+      if (!activeReasoningTraceKey) {
+        return
+      }
+
+      const reasoningMessage = createReasoningStepMessage(
+        mergeSchemaMessageChunk(activeAssistantMessage, messagePayload)
+      )
+      const hasReasoning = Boolean(String(reasoningMessage.reasoning_content || '').trim())
+
+      if (!hasReasoning && status === TOOL_TRACE_STATUS.SUCCESS) {
+        removeToolTraceRecord(activeReasoningTraceKey)
+        activeReasoningTraceKey = null
+        return
+      }
+
+      updateToolTraceRecord(activeReasoningTraceKey, (traceRecord) => ({
+        ...traceRecord,
+        message: reasoningMessage,
+        pending: status === TOOL_TRACE_STATUS.LOADING,
+        status
+      }))
+
+      if (status !== TOOL_TRACE_STATUS.LOADING) {
+        activeReasoningTraceKey = null
+      }
+    }
+
+    const startOrUpdateToolCallStep = (chunk) => {
+      ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+      activeToolCallMessage = mergeSchemaMessageChunk(
+        activeToolCallMessage || createEmptyAssistantMessage(),
         {
           ...chunk,
           content: '',
           reasoning_content: ''
         }
       )
+
+      if (!activeToolCallTraceKey) {
+        const plainContent = getAssistantPlainContent(activeAssistantMessage)
+        const traceDescription = plainContent
+          ? { role: MESSAGE_ROLES.ASSISTANT, content: plainContent }
+          : null
+
+        const traceRecord = createToolTraceRecord({
+          kind: TOOL_TRACE_KINDS.CALL,
+          message: activeToolCallMessage,
+          traceDescription,
+          status: TOOL_TRACE_STATUS.LOADING
+        })
+
+        activeToolCallTraceKey = traceRecord.key
+        activeAssistantMessage = createEmptyAssistantMessage()
+        activeRecordMode = ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+
+        patchActiveRecord((item) => ({
+          ...item,
+          message: createEmptyAssistantMessage(),
+          pending: true,
+          assistantRenderMode: ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN,
+          toolTraceRecords: [...(item.toolTraceRecords || []), traceRecord]
+        }))
+        return
+      }
+
+      updateToolTraceRecord(activeToolCallTraceKey, (traceRecord) => ({
+        ...traceRecord,
+        message: activeToolCallMessage,
+        pending: true,
+        status: TOOL_TRACE_STATUS.LOADING
+      }))
+    }
+
+    const completeToolCallStep = (messagePayload) => {
+      ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+      finalizeReasoningStep(messagePayload)
+      const completedMessage = mergeSchemaMessageChunk(
+        activeToolCallMessage || createEmptyAssistantMessage(),
+        messagePayload
+      )
+
+      const plainContent = getAssistantPlainContent(messagePayload)
+      if (activeToolCallTraceKey) {
+        updateToolTraceRecord(activeToolCallTraceKey, (traceRecord) => ({
+          ...traceRecord,
+          message: completedMessage,
+          pending: false,
+          status: TOOL_TRACE_STATUS.SUCCESS,
+          traceDescription: traceRecord.traceDescription || (
+            plainContent
+              ? { role: MESSAGE_ROLES.ASSISTANT, content: plainContent }
+              : null
+          )
+        }))
+      } else {
+        appendToolTraceRecord(createToolTraceRecord({
+          kind: TOOL_TRACE_KINDS.CALL,
+          message: completedMessage,
+          traceDescription: plainContent
+            ? { role: MESSAGE_ROLES.ASSISTANT, content: plainContent }
+            : null,
+          status: TOOL_TRACE_STATUS.SUCCESS
+        }))
+      }
+
+      activeToolCallTraceKey = null
+      activeToolCallMessage = null
+      activeAssistantMessage = createEmptyAssistantMessage()
+      activeRecordMode = ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+
+      patchActiveRecord((item) => ({
+        ...item,
+        message: createEmptyAssistantMessage(),
+        pending: true,
+        assistantRenderMode: ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+      }))
+    }
+
+    const startOrUpdateToolResultStep = (chunk) => {
+      ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+      activeToolResultMessage = mergeSchemaMessageChunk(activeToolResultMessage || {}, chunk)
+
+      if (!activeToolResultTraceKey) {
+        const traceRecord = createToolTraceRecord({
+          kind: TOOL_TRACE_KINDS.RESULT,
+          message: activeToolResultMessage,
+          status: TOOL_TRACE_STATUS.LOADING
+        })
+
+        activeToolResultTraceKey = traceRecord.key
+        appendToolTraceRecord(traceRecord)
+        return
+      }
+
+      updateToolTraceRecord(activeToolResultTraceKey, (traceRecord) => ({
+        ...traceRecord,
+        message: activeToolResultMessage,
+        pending: true,
+        status: TOOL_TRACE_STATUS.LOADING
+      }))
+    }
+
+    const completeToolResultStep = (messagePayload) => {
+      ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+      const completedMessage = mergeSchemaMessageChunk(activeToolResultMessage || {}, messagePayload)
+
+      if (activeToolResultTraceKey) {
+        updateToolTraceRecord(activeToolResultTraceKey, (traceRecord) => ({
+          ...traceRecord,
+          message: completedMessage,
+          pending: false,
+          status: TOOL_TRACE_STATUS.SUCCESS
+        }))
+      } else {
+        appendToolTraceRecord(createToolTraceRecord({
+          kind: TOOL_TRACE_KINDS.RESULT,
+          message: completedMessage,
+          status: TOOL_TRACE_STATUS.SUCCESS
+        }))
+      }
+
+      activeToolResultTraceKey = null
+      activeToolResultMessage = null
+      activeRecordMode = ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+    }
+
+    const updateAssistantDelta = (chunk) => {
+      ensureActiveAssistantRecord(activeRecordMode)
+      activeAssistantMessage = mergeSchemaMessageChunk(activeAssistantMessage, chunk)
+      if (String(activeAssistantMessage.reasoning_content || '').trim()) {
+        ensureReasoningStep()
+      }
+      setActiveAssistantState({
+        message: activeAssistantMessage,
+        pending: true,
+        assistantRenderMode: activeRecordMode
+      })
+    }
+
+    const completeAssistantMessage = (messagePayload) => {
+      ensureActiveAssistantRecord(activeRecordMode)
+      finalizeReasoningStep(messagePayload)
+      const completedMessage = mergeSchemaMessageChunk(activeAssistantMessage, messagePayload)
+      const nextRenderMode = activeRecordMode === ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+        ? ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN
+        : ASSISTANT_DISPLAY_MODES.DEFAULT
+
+      patchActiveRecord((item) => ({
+        ...item,
+        message: completedMessage,
+        pending: false,
+        assistantRenderMode: (item.toolTraceRecords || []).length > 0 ? ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN : nextRenderMode
+      }))
+
+      activeMessageKey = null
+      activeAssistantMessage = createEmptyAssistantMessage()
+      activeRecordMode = ASSISTANT_DISPLAY_MODES.DEFAULT
+      activeReasoningTraceKey = null
+      activeToolCallTraceKey = null
+      activeToolCallMessage = null
+      activeToolResultTraceKey = null
+      activeToolResultMessage = null
+    }
+
+    const markStreamFailed = () => {
+      finalizeReasoningStep(activeAssistantMessage, TOOL_TRACE_STATUS.ERROR)
+      finalizeStream(TOOL_TRACE_STATUS.ERROR)
     }
 
     try {
@@ -662,6 +990,10 @@ const useChat = () => {
 
           const event = parsed.data
           if (event?.type === SSE_EVENT_TYPES.RESPONSE_CREATED) {
+            if (runOptions.thinkingModeEnabled) {
+              ensureActiveAssistantRecord(ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN)
+              ensureReasoningStep({ placeholder: true })
+            }
             continue
           }
 
@@ -671,11 +1003,29 @@ const useChat = () => {
           }
 
           if (event?.type === SSE_EVENT_TYPES.RESPONSE_MESSAGE_COMPLETED) {
+            const payload = event?.response?.message
+            if (!isSchemaMessagePayload(payload)) {
+              continue
+            }
+
+            if (payload.role === MESSAGE_ROLES.ASSISTANT) {
+              if (isToolCallAssistantMessage(payload)) {
+                completeToolCallStep(payload)
+                continue
+              }
+
+              completeAssistantMessage(payload)
+              continue
+            }
+
+            if (payload.role === MESSAGE_ROLES.TOOL) {
+              completeToolResultStep(payload)
+            }
             continue
           }
 
           if (event?.type === SSE_EVENT_TYPES.RESPONSE_ERROR) {
-            finalizeStream()
+            markStreamFailed()
             message.error(event.message || '流式传输出错')
             return
           }
@@ -690,84 +1040,22 @@ const useChat = () => {
             continue
           }
 
-          const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0
-          const hasVisibleContent = hasVisibleAssistantContent(payload)
-          const finishReason = payload.response_meta?.finish_reason
-
           if (payload.role === MESSAGE_ROLES.ASSISTANT) {
-            if (hasToolCalls) {
-              updatePendingToolCallChunk(payload)
+            if (hasToolCalls(payload)) {
+              startOrUpdateToolCallStep(payload)
               continue
             }
 
-            if (activeRecordMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN) {
-              if (finishReason === 'tool_calls') {
-                if (pendingToolCallChunk) {
-                  commitPendingToolCallToThoughtChain()
-                } else {
-                  updateCurrentToolCallStatus(payload)
-                }
-                continue
-              }
-
-              if (hasVisibleContent || finishReason === 'stop') {
-                updateFinalAssistantInToolChain(payload)
-                continue
-              }
-
-              if (isMessageFinished(payload)) {
-                updateFinalAssistantInToolChain(payload)
-              }
+            if (!hasVisibleAssistantContent(payload)) {
               continue
             }
 
-            if (finishReason === 'tool_calls') {
-              if (!activeMessageKey) {
-                createToolChainRecord(pendingToolCallChunk || { role: MESSAGE_ROLES.ASSISTANT, tool_calls: [] })
-              } else {
-                commitPendingToolCallToThoughtChain()
-              }
-              continue
-            }
-
-            if (!activeMessageKey) {
-              createAssistantRecord(payload)
-              continue
-            }
-
-            updateActiveAssistantRecord(payload)
+            updateAssistantDelta(payload)
             continue
           }
 
           if (payload.role === MESSAGE_ROLES.TOOL) {
-            if (!activeMessageKey) {
-              createToolChainRecord(payload)
-            } else {
-              if (activeToolTraceKey) {
-                setMessages((prev) => prev.map((item) => {
-                  if (item.key !== activeMessageKey) {
-                    return item
-                  }
-
-                  const toolTraceRecords = Array.isArray(item.toolTraceRecords) ? [...item.toolTraceRecords] : []
-                  const traceIndex = toolTraceRecords.findIndex((record) => record.key === activeToolTraceKey)
-                  if (traceIndex === -1) {
-                    return item
-                  }
-
-                  toolTraceRecords[traceIndex] = {
-                    ...toolTraceRecords[traceIndex],
-                    pending: false
-                  }
-
-                  return {
-                    ...item,
-                    toolTraceRecords
-                  }
-                }))
-              }
-              appendToolTraceToActiveRecord(payload)
-            }
+            startOrUpdateToolResultStep(payload)
           }
         }
       }
@@ -775,7 +1063,7 @@ const useChat = () => {
       finalizeStream()
     } catch (err) {
       console.error('Stream error:', err)
-      finalizeStream()
+      markStreamFailed()
       message.error('流式传输出错: ' + err.message)
     } finally {
       if (didCreateSession) {

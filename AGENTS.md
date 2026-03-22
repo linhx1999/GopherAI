@@ -135,11 +135,16 @@ type Message struct {
 ### 3. 前端聊天渲染约定
 
 - 实时 SSE 消息使用 `renderMode=stream`，历史消息使用 `renderMode=instant`
-- 未启用工具时，`reasoning_content` 使用 `Think` 展示
-- 启用工具后，前端按 `finish_reason` 驱动 ThoughtChain：assistant 普通流式文本先按正文展示；收到 `finish_reason=tool_calls` 后，再把前面累积的文本回收为对应工具步骤的 `description`，步骤 `title` 使用工具 API 名称，随后 `role=tool` 作为独立结果项展示
-- 仅携带 `finish_reason` 等 metadata 的空 assistant chunk 不应单独渲染成气泡，而应只用于结束当前工具调用阶段或最终回答阶段
-- 只有最终 `finish_reason=stop` 前累积的最新 assistant 文本才作为正文 bubble 保留
-- ThoughtChain 中 `role=tool` 的结果内容统一使用 `XMarkdown` 渲染
+- assistant 的思考和工具过程统一使用 `ThoughtChain` 展示；最终回答正文仍保留为独立 bubble
+- 前端以 `response.message.completed` 作为 assistant/tool 消息的正式边界；`response.message.delta` 只负责增量渲染和 loading 态，不再单独决定 ThoughtChain 阶段切换
+- assistant 的 `reasoning_content` 统一映射为 `ThoughtChain` 中的“深度思考”步骤；thinking mode 开启后，流式开始即可先显示 loading 的思考步骤
+- assistant 完整消息若包含 `tool_calls`，思考内容保留为独立步骤，工具调用步骤的 `description` 仅承载调用前正文或简短说明，步骤 `title` 使用工具目录中的 API 名称映射展示名
+- 当同一条 assistant 同时存在多段思考和工具步骤时，ThoughtChain 必须按步骤产生的时间顺序展示；典型顺序为“第一次深度思考 -> 工具调用 -> 工具结果 -> 第二次深度思考”
+- 前端识别“工具调用 assistant 消息”时，以 `response_meta.finish_reason=tool_calls` 为准；最终 assistant completed 即使仍附带历史 `tool_calls`，也必须继续渲染最终回答 bubble
+- `role=tool` 的完整消息作为独立结果步骤挂到同一条 assistant 记录下；最终 assistant 完整消息才保留为正文 bubble
+- 仅携带 metadata 的空 assistant delta 不应单独渲染成气泡
+- 历史消息回放与流式过程共用同一套 ThoughtChain 聚合规则，刷新后应保持与流式阶段一致的步骤顺序和正文归属
+- ThoughtChain 中的思考内容和 `role=tool` 结果内容统一使用 `XMarkdown` 渲染
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
 - 点击“新建会话”仍只创建本地临时会话；首轮流式发送前前端必须先调用 `POST /api/v1/sessions`，拿到真实 `sessionId` 后再更新 `activeKey` 并发起 `/agent/stream`
