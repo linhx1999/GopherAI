@@ -42,7 +42,7 @@
 cp .env.example .env
 
 # 2. 启动依赖服务
-docker-compose up -d
+docker compose up -d
 
 # 3. 启动后端
 go mod download
