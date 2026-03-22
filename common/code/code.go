@@ -33,8 +33,6 @@ const (
 	AIModelFail                  Code = 5003
 	CodeMCPConnectionFailed      Code = 5004
 	CodeDeepAgentContainerFailed Code = 5005
-
-	TTSFail Code = 6001
 )
 
 var msg = map[Code]string{
@@ -66,7 +64,6 @@ var msg = map[Code]string{
 	AIModelFail:                  "模型运行失败",
 	CodeMCPConnectionFailed:      "MCP 服务连接失败",
 	CodeDeepAgentContainerFailed: "DeepAgent 容器运行失败",
-	TTSFail:                      "语音服务失败",
 }
 
 func (code Code) Code() int64 {

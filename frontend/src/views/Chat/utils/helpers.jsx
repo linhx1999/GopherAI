@@ -1,5 +1,5 @@
 import { Avatar, Typography } from 'antd'
-import { CopyOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
+import { CopyOutlined, UserOutlined } from '@ant-design/icons'
 import XMarkdown from '@ant-design/x-markdown'
 import {
   ASSISTANT_DISPLAY_MODES,
@@ -19,12 +19,8 @@ export const generateMessageId = () => {
 }
 
 // 创建消息操作项
-export const createMessageActions = (isUser) => {
-  const baseItems = [{ key: 'copy', icon: <CopyOutlined />, label: '复制' }]
-  if (isUser) {
-    return baseItems
-  }
-  return [...baseItems, { key: 'tts', icon: <SoundOutlined />, label: '朗读' }]
+export const createMessageActions = () => {
+  return [{ key: 'copy', icon: <CopyOutlined />, label: '复制' }]
 }
 
 // Markdown 渲染

@@ -1364,51 +1364,15 @@ const useChat = () => {
     }
   }, [attachments, buildChatRunOptions, displayMessages.length, handleAttachmentUpload, isStreaming, message, sendGenerateMessage, sendStreamMessage])
 
-  const playTTS = useCallback(async (text) => {
-    try {
-      const response = await api.post(API_ENDPOINTS.TTS, { text })
-      if (response.data?.code === STATUS_CODES.SUCCESS && response.data.data?.[0]?.task_id) {
-        const taskId = response.data.data[0].task_id
-        let attempts = 0
-        while (attempts < 30) {
-          const queryResponse = await api.get(API_ENDPOINTS.TTS_QUERY, { params: { task_id: taskId } })
-          if (queryResponse.data?.code === STATUS_CODES.SUCCESS) {
-            const ttsData = queryResponse.data.data?.[0] || {}
-            if (ttsData.task_status === 'Success' && ttsData.task_result) {
-              const audio = new Audio(ttsData.task_result)
-              audio.play()
-              return
-            }
-            if (ttsData.task_status === 'Failed') {
-              message.error('语音合成失败')
-              return
-            }
-          }
-          attempts += 1
-          await new Promise((resolve) => setTimeout(resolve, 2000))
-        }
-        message.error('语音合成超时')
-      } else {
-        message.error('无法创建语音合成任务')
-      }
-    } catch (error) {
-      console.error('TTS error:', error)
-      message.error('请求语音接口失败')
-    }
-  }, [message])
-
   const handleActionClick = useCallback((record, { key }) => {
     switch (key) {
       case 'copy':
         navigator.clipboard.writeText(record.message?.content || '')
         break
-      case 'tts':
-        playTTS(record.message?.content || '')
-        break
       default:
         break
     }
-  }, [playTTS])
+  }, [])
 
   useEffect(() => {
     return () => {

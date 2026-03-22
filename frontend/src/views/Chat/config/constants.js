@@ -13,13 +13,6 @@ export const TYPING_CONFIG = {
   interval: 20,
 }
 
-// ==================== TTS 轮询配置 ====================
-export const TTS_CONFIG = {
-  initialWaitTime: 5000,
-  maxPollAttempts: 30,
-  pollInterval: 2000,
-}
-
 // ==================== 文件上传配置 ====================
 export const SUPPORTED_FILE_TYPES = ['.md', '.txt']
 export const SUPPORTED_MIME_TYPES = ['text/markdown', 'text/plain']
@@ -75,10 +68,6 @@ export const API_ENDPOINTS = {
   FILE_DOWNLOAD: (fileId) => `file/download/${fileId}`,
   FILE_INDEX: (fileId) => `file/index/${fileId}`,
   FILE_INDEX_DELETE: (fileId) => `file/index/${fileId}`,
-
-  // TTS 接口
-  TTS: 'tts',
-  TTS_QUERY: 'tts/query',
 }
 
 // ==================== SSE 事件类型 ====================

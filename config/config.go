@@ -57,11 +57,6 @@ type RagModelConfig struct {
 	RagDimension      int
 }
 
-type VoiceServiceConfig struct {
-	VoiceServiceApiKey    string
-	VoiceServiceSecretKey string
-}
-
 type OpenAIConfig struct {
 	ApiKey             string
 	ModelName          string
@@ -99,7 +94,6 @@ type Config struct {
 	MainConfig
 	Rabbitmq
 	RagModelConfig
-	VoiceServiceConfig
 	OpenAIConfig
 	MinioConfig
 	MCPConfig
@@ -187,10 +181,6 @@ func InitConfig() error {
 			RagDocDir:         getEnv("RAG_DOC_DIR", "./docs"),
 			RagBaseUrl:        getEnv("RAG_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
 			RagDimension:      getEnvInt("RAG_DIMENSION", 1024),
-		},
-		VoiceServiceConfig: VoiceServiceConfig{
-			VoiceServiceApiKey:    getEnv("VOICE_API_KEY", ""),
-			VoiceServiceSecretKey: getEnv("VOICE_SECRET_KEY", ""),
 		},
 		OpenAIConfig: OpenAIConfig{
 			ApiKey:             getEnv("OPENAI_API_KEY", ""),

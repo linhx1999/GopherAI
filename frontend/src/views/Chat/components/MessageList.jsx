@@ -66,7 +66,7 @@ const MessageList = ({
       footer: (_, info) => {
         const record = info.extraInfo?.record
         return record && !record.pending
-          ? <Actions items={createMessageActions(true)} onClick={(actionInfo) => onActionClick(record, actionInfo)} />
+          ? <Actions items={createMessageActions()} onClick={(actionInfo) => onActionClick(record, actionInfo)} />
           : null
       },
       style: { maxWidth: MESSAGE_MAX_WIDTH }
@@ -80,7 +80,7 @@ const MessageList = ({
       footer: (_, info) => {
         const record = info.extraInfo?.record
         return record && !record.pending
-          ? <Actions items={createMessageActions(false)} onClick={(actionInfo) => onActionClick(record, actionInfo)} />
+          ? <Actions items={createMessageActions()} onClick={(actionInfo) => onActionClick(record, actionInfo)} />
           : null
       },
       style: { maxWidth: MESSAGE_MAX_WIDTH }
