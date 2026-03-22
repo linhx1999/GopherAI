@@ -128,10 +128,6 @@ func publishMessageToDB(msg *model.Message) {
 	}
 }
 
-func appendMessageToCache(msg *model.Message) error {
-	return nil
-}
-
 func persistMessage(sessionID string, msg *model.Message) {
 	if msg == nil {
 		return

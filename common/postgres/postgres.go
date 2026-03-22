@@ -97,12 +97,12 @@ func CreateVectorIndex(dimension int) error {
 
 	// 创建 IVFFlat 索引（lists 参数根据数据量调整，通常为 行数/1000）
 	// 对于小数据集，可以先不创建索引，等待数据量增长后再创建
-	sql := fmt.Sprintf(`
-		CREATE INDEX document_chunks_embedding_idx 
-		ON document_chunks 
+	sql := `
+		CREATE INDEX document_chunks_embedding_idx
+		ON document_chunks
 		USING ivfflat (embedding vector_cosine_ops)
 		WITH (lists = 100)
-	`)
+	`
 	return DB.Exec(sql).Error
 }
 

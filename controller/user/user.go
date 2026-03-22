@@ -13,7 +13,7 @@ type (
 	//这里的Username只能是账号登录，和我做的另一个项目有区别（邮箱账号均可)
 	LoginRequest struct {
 		Username string `json:"username"`
-		Password string `json:password`
+		Password string `json:"password"`
 	}
 	//验证码由后端生成，存放到redis中，固然需要先发送一次请求CaptchaRequest,然后用返回的验证码
 	//邮箱以及密码进行注册，后续再将账号进行返回
