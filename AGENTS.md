@@ -80,7 +80,7 @@ GopherAI/
 
 - 核心目录：`common/agent/`
 - `manager.go` 负责基于全局 ChatModel 池按请求创建 Eino ADK `ChatModelAgent`
-- `common/agent/tools/` 维护工具实现与本地工具定义；目录下除工具文件外，仅保留 `manager.go`（内部管理）和 `interface.go`（对外接口），后端在 `manager.go` 中按请求中的工具名直接构造 `[]tool.BaseTool`
+- `common/agent/tools/` 维护工具实现与本地工具定义；目录下除工具文件外，仅保留 `manager.go`（内部管理）和 `interface.go`（对外接口），后端通过 `ResolveRequestedTools` 按请求中的工具名直接解析 `[]tool.BaseTool`
 - 请求中的 `tools` 仅代表本轮显式启用的工具 API 名称；未传或为空时不隐式启用默认工具
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequentialthinking`
 - 请求中的未知工具名属于参数错误，必须在创建会话、写入消息和调用模型前被拦截
@@ -152,7 +152,7 @@ type Message struct {
 - 当 `Bubble.List` 内容在持续增长时，`scrollTo({ top: 'bottom', behavior: 'smooth' })` 可能被组件内部兼容逻辑退化为 `instant`，以保证列表继续贴底
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名，返回结构固定为 `name` / `display_name` / `description`；前端不能把展示名回传给后端
-- `sequentialthinking` 由 `common/agent/tools/sequential_thinking.go` 中的本地包装类型 `sequentialThinking` 统一维护工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`common/agent/tools/manager.go` 与 `interface.go` 负责基于该定义输出工具目录并为每次请求创建独立实例，避免跨请求共享思维链状态
+- `sequentialthinking` 由 `common/agent/tools/sequential_thinking.go` 统一维护工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`ResolveRequestedTools` 为每次请求创建独立实例，避免跨请求共享思维链状态
 - 点击“新建会话”仍只创建本地临时会话；首轮流式发送前前端必须先调用 `POST /api/v1/sessions`，拿到真实 `sessionId` 后再更新 `activeKey` 并发起 `/agent/stream`
 - `/agent/stream` 的 SSE 不再下发 `message_index`；前端按 `response.*` 事件顺序驱动当前消息与 ThoughtChain 状态
 - 非流式生成成功后优先回查历史；若本轮 assistant 尚未完成异步落库且未启用工具，前端使用 `/agent/generate` 返回的最终 `schema.Message` 做一次本地兜底，确保思考内容可立即显示
@@ -201,8 +201,9 @@ type Message struct {
 ### Agent 接口约定
 
 - `tools` 字段是请求级显式工具 API 名称列表，不写入会话配置
-- 后端按请求中的工具名顺序去重后装配 `[]tool.BaseTool`；未知工具名直接返回参数错误
+- 后端通过 `ResolveRequestedTools` 按请求中的工具名顺序去重后装配 `[]tool.BaseTool`；未知工具名直接返回参数错误
 - `service/agent` 的生成与流式入口共享同一套显式参数准备逻辑，不再额外定义内部请求 DTO
+- `service/agent` 负责基于解析后的工具实例构建 `compose.ToolsNodeConfig`，再交给 `common/agent/manager` 创建 ADK agent
 - system prompt 通过 ADK `ChatModelAgentConfig.Instruction` 注入；会话消息数组只包含历史消息和当前用户消息
 - SSE `data` 统一传 `{ type, code, message, response }`；流式消息内容位于 `response.delta` 或 `response.message`
 - `/agent/stream` 必须携带已有 `session_id`；缺失时直接返回参数错误 SSE 事件

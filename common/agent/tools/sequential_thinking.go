@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino-ext/components/tool/sequentialthinking"
+	"github.com/cloudwego/eino/components/tool"
 )
 
 const (
@@ -16,12 +17,12 @@ const (
 var SequentialThinkingTool = initSequentialThinking()
 
 func initSequentialThinking() Tool {
-	tool, err := sequentialthinking.NewTool()
+	builtTool, err := sequentialthinking.NewTool()
 	if err != nil {
 		panic(fmt.Sprintf("create sequentialthinking tool definition failed: %v", err))
 	}
 
-	info, err := tool.Info(context.Background())
+	info, err := builtTool.Info(context.Background())
 	if err != nil {
 		panic(fmt.Sprintf("load sequentialthinking tool info failed: %v", err))
 	}
@@ -38,6 +39,14 @@ func initSequentialThinking() Tool {
 		name:        toolName,
 		displayName: sequentialThinkingDisplayName,
 		description: sequentialThinkingDescription,
-		tool:        tool,
+		tool:        builtTool,
 	}
+}
+
+func SequentialThinkingToolName() string {
+	return SequentialThinkingTool.name
+}
+
+func GetSequentialThinkingTool() (tool.BaseTool, error) {
+	return sequentialthinking.NewTool()
 }

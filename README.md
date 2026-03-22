@@ -69,10 +69,11 @@ pnpm dev
 - 持久化模型统一采用“`gorm.Model` + 业务 UUID”双标识；数据库内部关联走数值 ID，对外接口统一使用业务 UUID
 - Session 模型不持久化工具列表；工具启用状态仅来自当前请求的 `tools`
 - `GET /api/v1/tools` 返回 `name`、`display_name`、`description`：前者用于 API 调用，后两者仅用于前端展示
-- 后端工具按工具名拆分到 `common/agent/tools/*.go`；目录下除工具文件外，仅保留 `manager.go` 与 `interface.go` 两个收口文件，智能体在创建时按请求中的工具名直接注入 `[]tool.BaseTool`
+- 后端工具按工具名拆分到 `common/agent/tools/*.go`；目录下除工具文件外，仅保留 `manager.go` 与 `interface.go` 两个收口文件，`ResolveRequestedTools` 会按请求中的工具名直接解析 `[]tool.BaseTool`
 - 生成与流式执行共享同一套准备逻辑，服务端按请求参数直接装配 agent 与执行上下文，不再额外包装内部请求对象
 - 内置工具标准调用名保持为 `knowledge_search` 和 `sequentialthinking`；前端应始终使用接口返回的 `name`，展示时使用 `display_name`
-- `sequentialthinking` 在 `common/agent/tools/sequential_thinking.go` 中通过本地包装类型 `sequentialThinking` 维护单一工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`manager.go` 与 `interface.go` 负责基于该定义适配工具目录输出与实例构造，避免跨请求共享思维链状态
+- `sequentialthinking` 在 `common/agent/tools/sequential_thinking.go` 中维护单一工具定义：初始化时通过上游 `sequentialthinking.NewTool()` 创建并保存一个 `tool` 字段，用它读取运行时工具名；`ResolveRequestedTools` 会为每次请求创建独立实例，避免跨请求共享思维链状态
+- `service/agent` 负责用解析后的工具实例构建 `compose.ToolsNodeConfig`，再交给 `common/agent/manager` 创建 ADK agent；`knowledge_search` 不再依赖 `fileRefIDs`
 - `POST /api/v1/agent/*` 收到未知工具名时会直接返回请求参数错误，且不会创建会话、写入消息或触发模型调用
 - 后端执行层基于 Eino ADK `ChatModelAgent` + `Runner`；底层 ChatModel 按模型名全局复用，ChatModelAgent 按请求创建
 - 流式首轮对话改为“先 `POST /api/v1/sessions` 创建会话，再 `POST /api/v1/agent/stream` 拉取智能体输出”；`/agent/stream` 必须携带已有 `session_id`

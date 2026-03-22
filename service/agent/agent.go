@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -313,12 +314,23 @@ func prepareChatExecution(
 	thinkingMode bool,
 	allowCreateSession bool,
 ) (*preparedChatExecution, code.Code) {
-	normalizedToolNames := agenttools.NormalizeToolNames(enabledToolNames)
-	hasEnabledTools := len(normalizedToolNames) > 0
+	resolvedTools, err := agenttools.ResolveRequestedTools(ctx, enabledToolNames)
+	if err != nil {
+		if agenttools.IsUnknownToolError(err) {
+			log.Println("prepareChatExecution ResolveRequestedTools invalid tools:", err)
+			return nil, code.CodeInvalidParams
+		}
+		log.Println("prepareChatExecution ResolveRequestedTools error:", err)
+		return nil, code.AIModelFail
+	}
+
+	toolsNodeConfig := compose.ToolsNodeConfig{
+		Tools: resolvedTools,
+	}
+	hasEnabledTools := len(resolvedTools) > 0
 	agent, err := agentcommon.GetAgentManager().CreateAgentForChat(
 		ctx,
-		userRefID,
-		normalizedToolNames,
+		toolsNodeConfig,
 		thinkingMode,
 		buildAgentInstruction(hasEnabledTools),
 	)

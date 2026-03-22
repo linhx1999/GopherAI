@@ -6,18 +6,30 @@ import (
 	"testing"
 )
 
-func TestNormalizeToolNamesPreservesRequestOrder(t *testing.T) {
-	names := NormalizeToolNames([]string{
+func TestResolveRequestedToolsPreservesRequestOrder(t *testing.T) {
+	resolvedTools, err := ResolveRequestedTools(context.Background(), []string{
 		" sequentialthinking ",
 		"knowledge_search",
 		"sequentialthinking",
 		"",
 		"knowledge_search",
 	})
+	if err != nil {
+		t.Fatalf("ResolveRequestedTools returned error: %v", err)
+	}
+
+	actualNames := make([]string, 0, len(resolvedTools))
+	for _, resolvedTool := range resolvedTools {
+		info, infoErr := resolvedTool.Info(context.Background())
+		if infoErr != nil {
+			t.Fatalf("resolved tool info error: %v", infoErr)
+		}
+		actualNames = append(actualNames, info.Name)
+	}
 
 	expected := []string{"sequentialthinking", "knowledge_search"}
-	if !reflect.DeepEqual(names, expected) {
-		t.Fatalf("unexpected normalized names: %#v", names)
+	if !reflect.DeepEqual(actualNames, expected) {
+		t.Fatalf("unexpected resolved tools: %#v", actualNames)
 	}
 }
 
@@ -80,17 +92,17 @@ func TestSequentialThinkingToolDefinitionKeepsInitializedTool(t *testing.T) {
 	}
 }
 
-func TestBuildRequestedToolsReturnsUnknownToolError(t *testing.T) {
-	_, err := BuildRequestedTools(context.Background(), []string{"missing_tool"}, nil)
+func TestResolveRequestedToolsReturnsUnknownToolError(t *testing.T) {
+	_, err := ResolveRequestedTools(context.Background(), []string{"missing_tool"})
 	if !IsUnknownToolError(err) {
 		t.Fatalf("expected unknown tool error, got %T", err)
 	}
 }
 
-func TestBuildRequestedToolsInjectsKnowledgeSearchWithoutIndexedFiles(t *testing.T) {
-	builtTools, err := BuildRequestedTools(context.Background(), []string{"knowledge_search"}, nil)
+func TestResolveRequestedToolsInjectsKnowledgeSearchWithoutFileScope(t *testing.T) {
+	builtTools, err := ResolveRequestedTools(context.Background(), []string{"knowledge_search"})
 	if err != nil {
-		t.Fatalf("BuildRequestedTools returned error: %v", err)
+		t.Fatalf("ResolveRequestedTools returned error: %v", err)
 	}
 	if len(builtTools) != 1 {
 		t.Fatalf("unexpected tool count: %d", len(builtTools))

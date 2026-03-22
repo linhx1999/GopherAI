@@ -329,6 +329,63 @@ func RetrieveDocumentsFromMultipleFiles(ctx context.Context, fileRefIDs []uint, 
 	return docs, nil
 }
 
+// RetrieveDocuments 从全部已索引文档中检索相关内容。
+func RetrieveDocuments(ctx context.Context, query string, topK int) ([]*schema.Document, error) {
+	cfg := config.GetConfig()
+	apiKey := os.Getenv("OPENAI_API_KEY")
+
+	embedConfig := &embeddingArk.EmbeddingConfig{
+		BaseURL: cfg.RagModelConfig.RagBaseUrl,
+		APIKey:  apiKey,
+		Model:   cfg.RagModelConfig.RagEmbeddingModel,
+	}
+	embedder, err := embeddingArk.NewEmbedder(ctx, embedConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedder: %w", err)
+	}
+
+	embeddings, err := embedder.EmbedStrings(ctx, []string{query})
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
+	if len(embeddings) == 0 {
+		return nil, fmt.Errorf("no embedding generated for query")
+	}
+
+	float32Embedding := make([]float32, len(embeddings[0]))
+	for i, v := range embeddings[0] {
+		float32Embedding[i] = float32(v)
+	}
+	vector := pgvector.NewVector(float32Embedding)
+
+	var results []model.DocumentChunkWithDistance
+	querySQL := `
+		SELECT id, chunk_id, file_ref_id, content, metadata, created_at,
+			   1 - (embedding <=> ?) as distance
+		FROM document_chunks
+		ORDER BY embedding <=> ?
+		LIMIT ?
+	`
+	if err := postgres.DB.Raw(querySQL, vector, vector, topK).Scan(&results).Error; err != nil {
+		return nil, fmt.Errorf("failed to retrieve documents: %w", err)
+	}
+
+	docs := make([]*schema.Document, 0, len(results))
+	for _, result := range results {
+		doc := &schema.Document{
+			ID:      fmt.Sprintf("%d", result.ID),
+			Content: result.Content,
+			MetaData: map[string]any{
+				"file_ref_id": result.FileRefID,
+				"distance":    result.Distance,
+			},
+		}
+		docs = append(docs, doc)
+	}
+
+	return docs, nil
+}
+
 // BuildRAGPrompt 构建包含检索文档的提示词
 func BuildRAGPrompt(query string, docs []*schema.Document) string {
 	if len(docs) == 0 {

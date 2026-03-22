@@ -21,13 +21,11 @@ var KnowledgeSearchTool = Tool{
 	name:        knowledgeSearchToolName,
 	displayName: knowledgeSearchToolDisplayName,
 	description: knowledgeSearchToolDescription,
-	tool:        newKnowledgeSearchTool([]uint{}),
+	tool:        newKnowledgeSearchTool(),
 }
 
 // RAGTool RAG 检索工具
-type RAGTool struct {
-	fileRefIDs []uint // 可检索的文件内部 ID 列表
-}
+type RAGTool struct{}
 
 // RAGToolParams RAG 工具参数
 type RAGToolParams struct {
@@ -79,23 +77,13 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 		params.TopK = 5
 	}
 
-	// 4. 如果没有可检索的文件，返回提示
-	if len(t.fileRefIDs) == 0 {
-		result := RAGToolResult{
-			Documents: []string{},
-			Count:     0,
-		}
-		bytes, _ := json.Marshal(result)
-		return string(bytes), nil
-	}
-
-	// 5. 执行检索
-	docs, err := rag.RetrieveDocumentsFromMultipleFiles(ctx, t.fileRefIDs, params.Query, params.TopK)
+	// 4. 执行检索
+	docs, err := rag.RetrieveDocuments(ctx, params.Query, params.TopK)
 	if err != nil {
 		return "", fmt.Errorf("rag retrieve failed: %w", err)
 	}
 
-	// 6. 构建结果
+	// 5. 构建结果
 	result := RAGToolResult{
 		Documents: make([]string, 0, len(docs)),
 		Count:     len(docs),
@@ -104,7 +92,7 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 		result.Documents = append(result.Documents, doc.Content)
 	}
 
-	// 7. 序列化返回
+	// 6. 序列化返回
 	bytes, err := json.Marshal(result)
 	if err != nil {
 		return "", err
@@ -112,10 +100,10 @@ func (t *RAGTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	return string(bytes), nil
 }
 
-func newKnowledgeSearchTool(fileRefIDs []uint) tool.InvokableTool {
-	return &RAGTool{fileRefIDs: fileRefIDs}
+func newKnowledgeSearchTool() tool.InvokableTool {
+	return &RAGTool{}
 }
 
-func GetKnowledgeSearchTool(fileRefIDs []uint) tool.BaseTool {
-	return newKnowledgeSearchTool(fileRefIDs)
+func GetKnowledgeSearchTool() tool.BaseTool {
+	return newKnowledgeSearchTool()
 }
