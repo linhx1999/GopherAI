@@ -135,16 +135,21 @@ type Message struct {
 ### 3. 前端聊天渲染约定
 
 - 实时 SSE 消息使用 `renderMode=stream`，历史消息使用 `renderMode=instant`
+- 聊天页前端默认开启流式输出和思考模式；输入区开关只影响当前页面会话中的后续请求，不做本地持久化
 - assistant 的思考和工具过程统一使用 `ThoughtChain` 展示；最终回答正文仍保留为独立 bubble
 - 前端以 `response.message.completed` 作为 assistant/tool 消息的正式边界；`response.message.delta` 只负责增量渲染和 loading 态，不再单独决定 ThoughtChain 阶段切换
 - assistant 的 `reasoning_content` 统一映射为 `ThoughtChain` 中的“深度思考”步骤；thinking mode 开启后，流式开始即可先显示 loading 的思考步骤
 - assistant 完整消息若包含 `tool_calls`，思考内容保留为独立步骤，工具调用步骤的 `description` 仅承载调用前正文或简短说明，步骤 `title` 使用工具目录中的 API 名称映射展示名
 - 当同一条 assistant 同时存在多段思考和工具步骤时，ThoughtChain 必须按步骤产生的时间顺序展示；典型顺序为“第一次深度思考 -> 工具调用 -> 工具结果 -> 第二次深度思考”
+- ThoughtChain 统一通过 `defaultExpandedKeys` 默认展开全部步骤；reasoning 内容、工具调用参数和工具执行结果首次渲染时都应直接展示，用户可再手动折叠
 - 前端识别“工具调用 assistant 消息”时，以 `response_meta.finish_reason=tool_calls` 为准；最终 assistant completed 即使仍附带历史 `tool_calls`，也必须继续渲染最终回答 bubble
 - `role=tool` 的完整消息作为独立结果步骤挂到同一条 assistant 记录下；最终 assistant 完整消息才保留为正文 bubble
 - 仅携带 metadata 的空 assistant delta 不应单独渲染成气泡
 - 历史消息回放与流式过程共用同一套 ThoughtChain 聚合规则，刷新后应保持与流式阶段一致的步骤顺序和正文归属
 - ThoughtChain 中的思考内容和 `role=tool` 结果内容统一使用 `XMarkdown` 渲染
+- 聊天消息列表统一使用 `Bubble.List` 渲染；同一条 assistant 记录在前端展示阶段会拆成 `thought_chain` 列表项和最终回答列表项
+- 列表滚动统一通过 `Bubble.ListRef.scrollTo` 控制；自动下滑只在用户当前接近底部且位于最后一页时生效
+- 当 `Bubble.List` 内容在持续增长时，`scrollTo({ top: 'bottom', behavior: 'smooth' })` 可能被组件内部兼容逻辑退化为 `instant`，以保证列表继续贴底
 - 工具目录通过 `GET /api/v1/tools` 动态拉取
 - 工具目录中的 `name` 是 API 调用名，`display_name` 是前端展示名；前端不能把展示名回传给后端
 - 点击“新建会话”仍只创建本地临时会话；首轮流式发送前前端必须先调用 `POST /api/v1/sessions`，拿到真实 `sessionId` 后再更新 `activeKey` 并发起 `/agent/stream`

@@ -5,6 +5,7 @@
 
 // ==================== 分页配置 ====================
 export const MESSAGE_PAGE_SIZE = 10
+export const MESSAGE_LIST_BOTTOM_THRESHOLD = 120
 
 // ==================== 打字效果配置 ====================
 export const TYPING_CONFIG = {

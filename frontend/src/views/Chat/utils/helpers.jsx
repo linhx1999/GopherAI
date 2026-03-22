@@ -317,51 +317,44 @@ export const buildDisplayMessages = (records) => {
 
   records.forEach((record) => {
     const message = record.message || {}
+    const toolTraceRecords = record.toolTraceRecords || []
+    const hasThoughtChain = (
+      Array.isArray(toolTraceRecords) &&
+      toolTraceRecords.length > 0 &&
+      shouldRenderToolTrace(record, toolTraceRecords)
+    )
 
     if (message.role === 'user' || message.role === 'system') {
-      display.push({ type: message.role, key: record.key, record })
+      display.push({ type: message.role, role: message.role, key: record.key, record })
       return
     }
 
-    if (
-      message.role === 'assistant' &&
-      (
-        record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.TOOL_CHAIN ||
-        record.assistantRenderMode === ASSISTANT_DISPLAY_MODES.THOUGHT_CHAIN ||
-        (Array.isArray(record.toolTraceRecords) && record.toolTraceRecords.length > 0)
-      )
-    ) {
-      display.push({
-        type: 'assistant',
-        key: record.key,
-        record,
-        toolTraceRecords: record.toolTraceRecords || []
-      })
+    if (message.role !== 'assistant') {
       return
     }
 
-    if (Array.isArray(record.toolTraceRecords) && record.toolTraceRecords.length > 0) {
+    if (hasThoughtChain) {
       display.push({
-        type: 'assistant',
-        key: record.key,
+        type: 'thought_chain',
+        role: 'thought_chain',
+        key: `${record.key}_thought_chain`,
         record,
-        toolTraceRecords: record.toolTraceRecords
+        toolTraceRecords
       })
-      return
     }
 
     if (isToolTraceMessage(message)) {
       return
     }
 
-    if (message.role === 'assistant') {
+    if (String(message.content || '').trim()) {
       display.push({
         type: 'assistant',
-        key: record.key,
+        role: 'assistant',
+        key: hasThoughtChain ? `${record.key}_assistant` : record.key,
         record,
-        toolTraceRecords: record.toolTraceRecords || []
+        toolTraceRecords
       })
-      return
     }
   })
 

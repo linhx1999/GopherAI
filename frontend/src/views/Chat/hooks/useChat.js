@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { App } from 'antd'
 import api, { API_BASE_URL } from '../../../utils/api'
 import { getStoredToken, handleUnauthorized, isUnauthorizedResponseCode } from '../../../utils/auth'
 import useToolCatalog from './useToolCatalog'
 import {
   ASSISTANT_DISPLAY_MODES,
+  MESSAGE_LIST_BOTTOM_THRESHOLD,
   MESSAGE_PAGE_SIZE,
   STATUS_CODES,
   API_ENDPOINTS,
@@ -21,6 +22,7 @@ import {
   hasVisibleMessageText,
   isToolCallAssistantMessage,
   isSchemaMessagePayload,
+  buildDisplayMessages,
   mergeSchemaMessageChunk,
   normalizeEnabledToolAPINames,
   parseSSELine
@@ -289,13 +291,16 @@ const settleRecord = (record, traceFallbackStatus = TOOL_TRACE_STATUS.SUCCESS) =
 const useChat = () => {
   const { message } = App.useApp()
   const bubbleListRef = useRef(null)
+  const isNearBottomRef = useRef(true)
+  const isLastDisplayPageRef = useRef(true)
+  const previousLastDisplayPageRef = useRef(1)
   const latestHistorySessionRef = useRef(null)
   const activeKeyRef = useRef(null)
   const isTempSessionRef = useRef(false)
   const { availableTools } = useToolCatalog()
 
   const [enabledToolAPINames, setEnabledToolAPINames] = useState([])
-  const [thinkingMode, setThinkingMode] = useState(false)
+  const [thinkingMode, setThinkingMode] = useState(true)
   const [isStreaming, setIsStreaming] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [inputValue, setInputValue] = useState('')
@@ -311,6 +316,52 @@ const useChat = () => {
   const [isTempSession, setIsTempSession] = useState(false)
   const [editingSession, setEditingSession] = useState(null)
   const [editTitle, setEditTitle] = useState('')
+  const displayMessages = useMemo(() => buildDisplayMessages(messages), [messages])
+  const lastDisplayPage = Math.max(1, Math.ceil(displayMessages.length / MESSAGE_PAGE_SIZE))
+  const isLastDisplayPage = currentPage >= lastDisplayPage
+
+  useEffect(() => {
+    isLastDisplayPageRef.current = isLastDisplayPage
+  }, [isLastDisplayPage])
+
+  useEffect(() => {
+    const previousLastDisplayPage = previousLastDisplayPageRef.current
+
+    if (
+      lastDisplayPage > previousLastDisplayPage &&
+      currentPage === previousLastDisplayPage &&
+      isNearBottomRef.current
+    ) {
+      setCurrentPage(lastDisplayPage)
+    }
+
+    previousLastDisplayPageRef.current = lastDisplayPage
+  }, [currentPage, lastDisplayPage])
+
+  const handleBubbleListScroll = useCallback((event) => {
+    const target = event?.target
+    if (!target) {
+      return
+    }
+
+    const distanceToBottom = target.scrollHeight - target.clientHeight - target.scrollTop
+    isNearBottomRef.current = distanceToBottom <= MESSAGE_LIST_BOTTOM_THRESHOLD
+  }, [])
+
+  const scrollToBottomIfNeeded = useCallback(({ behavior = 'smooth', force = false } = {}) => {
+    const listRef = bubbleListRef.current
+    if (!listRef?.scrollTo) {
+      return
+    }
+
+    if (!force && (!isNearBottomRef.current || !isLastDisplayPageRef.current)) {
+      return
+    }
+
+    requestAnimationFrame(() => {
+      bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior })
+    })
+  }, [])
 
   const loadSessions = useCallback(async () => {
     try {
@@ -1182,7 +1233,7 @@ const useChat = () => {
     setAttachmentsOpen(false)
 
     setCurrentPage((prevPage) => {
-      const total = messages.length + 1
+      const total = displayMessages.length + 1
       const page = Math.ceil(total / MESSAGE_PAGE_SIZE)
       return prevPage !== page ? page : prevPage
     })
@@ -1194,9 +1245,7 @@ const useChat = () => {
     } else {
       await sendGenerateMessage(messageContent, runOptions)
     }
-
-    bubbleListRef.current?.scrollTo?.({ top: 'bottom', behavior: 'smooth' })
-  }, [attachments, buildChatRunOptions, handleAttachmentUpload, isStreaming, message, messages.length, sendGenerateMessage, sendStreamMessage])
+  }, [attachments, buildChatRunOptions, displayMessages.length, handleAttachmentUpload, isStreaming, message, sendGenerateMessage, sendStreamMessage])
 
   const playTTS = useCallback(async (text) => {
     try {
@@ -1254,8 +1303,13 @@ const useChat = () => {
     }
   }, [attachments])
 
+  useEffect(() => {
+    scrollToBottomIfNeeded({ behavior: 'smooth' })
+  }, [currentPage, displayMessages.length, messages, scrollToBottomIfNeeded])
+
   return {
     bubbleListRef,
+    handleBubbleListScroll,
     availableTools,
     enabledToolAPINames,
     thinkingMode,

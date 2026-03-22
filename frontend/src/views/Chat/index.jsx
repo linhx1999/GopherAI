@@ -5,7 +5,7 @@ import ChatHeader from './components/ChatHeader'
 import MessageList from './components/MessageList'
 import InputArea from './components/InputArea'
 import useChat from './hooks/useChat'
-import { createRoleConfig, createToolDisplayNameMap } from './utils/helpers.jsx'
+import { createToolDisplayNameMap } from './utils/helpers.jsx'
 import './index.css'
 import { theme } from 'antd';
 
@@ -46,6 +46,8 @@ const Chat = () => {
     // 消息操作
     handleSend,
     handleActionClick,
+    bubbleListRef,
+    handleBubbleListScroll,
     // 状态更新
     setEnabledToolAPINames,
     setThinkingMode,
@@ -56,8 +58,6 @@ const Chat = () => {
     setAttachmentsOpen
   } = useChat()
 
-  // Role 配置
-  const roleConfig = useMemo(() => createRoleConfig(), [])
   const toolDisplayNames = useMemo(() => createToolDisplayNameMap(availableTools), [availableTools])
 
   return (
@@ -82,10 +82,11 @@ const Chat = () => {
         <MessageList
           messages={messages}
           currentPage={currentPage}
-          roleConfig={roleConfig}
           toolDisplayNames={toolDisplayNames}
           onActionClick={handleActionClick}
           onPageChange={setCurrentPage}
+          bubbleListRef={bubbleListRef}
+          onListScroll={handleBubbleListScroll}
         />
 
         <InputArea
