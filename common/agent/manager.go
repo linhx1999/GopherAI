@@ -111,6 +111,7 @@ func (m *AgentManager) buildDeepAgent(
 		MaxIteration: maxIterations,
 		Backend:      backend,
 		Shell:        shell,
+		Handlers:     deepAgentHandlers(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create adk deep agent failed: %w", err)

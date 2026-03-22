@@ -233,6 +233,7 @@ type Message struct {
 - DeepAgent 请求体与普通聊天接口保持同构，但通过独立 `/api/v1/deep-agent/*` 路由进入，不复用 `/api/v1/agent/*`
 - 后端通过 `ResolveRequestedTools` 按请求中的工具名顺序去重后装配 `[]tool.BaseTool`；未知工具名直接返回参数错误
 - DeepAgent 额外注入 `write_todos`、`task`、`read_file`、`write_file`、`edit_file`、`glob`、`grep`、`execute` 工具；文件操作仅允许访问该用户的 `workspace/<userUUID>` 空工作区
+- DeepAgent 工具调用失败时，不直接终止 agent run；失败会被转成 `role=tool` 结果消息返回给模型继续决策。只有请求取消、超时和 interrupt/rerun 这类控制流错误会继续中断执行
 - 同一用户的 DeepAgent 请求严格串行；若已有请求占用该用户容器，新请求直接返回 `CodeDeepAgentRuntimeBusy`
 - 后端通过 `service/mcp.ResolveEnabledTools` 校验 `mcp_server_ids` 属于当前用户，并在请求期间按 `transport_type` 临时建立远程 SSE 或 streamable HTTP MCP 连接；请求结束后必须清理 client
 - `service/agent` 的生成与流式入口共享同一套显式参数准备逻辑，不再额外定义内部请求 DTO

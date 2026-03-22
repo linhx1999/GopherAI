@@ -68,6 +68,7 @@ pnpm dev
 - `POST /api/v1/agent/*` 的 `tools` 表示“本次请求显式启用的内置工具 API 名称列表”
 - `POST /api/v1/agent/*` 与 `POST /api/v1/deep-agent/*` 都支持 `mcp_server_ids`，表示“本次请求整体启用的 MCP 服务 ID 列表”
 - DeepAgent 走独立接口 `/api/v1/deep-agent/generate` 与 `/api/v1/deep-agent/stream`；现有 `/api/v1/agent/*` 保持普通聊天链路不变
+- DeepAgent 在工具调用失败时会把失败信息作为工具结果返回给模型继续推理；只有请求取消、超时和 interrupt/rerun 这类控制流错误才会直接中断
 - SSE 每一帧统一输出 `{ type, code, message, response }` envelope
 - 流式事件固定使用 `response.created` / `response.message.delta` / `response.message.completed` / `response.error` / `response.done`
 - 历史消息接口返回 `{ message_id, index, message, created_at }`，其中 `message` 为完整 `schema.Message`
